@@ -228,10 +228,13 @@ def test_unhandled_failure_logs_sanitized_context_and_completion(app: object, ca
 
 
 @pytest.mark.asyncio
-async def test_resource_cleanup_closes_redis_when_database_dispose_fails() -> None:
+async def test_resource_cleanup_closes_redis_when_database_dispose_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from fastapi import FastAPI
 
     from rag_eval_api.db import close_resources
+    from rag_eval_api.main import JsonLogFormatter, logger
 
     class FailingEngine:
         async def dispose(self) -> None:
@@ -248,6 +251,16 @@ async def test_resource_cleanup_closes_redis_when_database_dispose_fails() -> No
     application.state.db_engine = FailingEngine()
     application.state.redis_client = redis_client
 
-    await close_resources(application)
+    caplog.set_level(logging.ERROR, logger=logger.name)
+    logger.propagate = True
+    try:
+        await close_resources(application)
+    finally:
+        logger.propagate = False
 
     assert redis_client.closed
+    cleanup_records = [record for record in caplog.records if record.event == "resource.cleanup.failed"]
+    assert cleanup_records
+    assert all(record.name == logger.name for record in cleanup_records)
+    assert any(isinstance(handler.formatter, JsonLogFormatter) for handler in logger.handlers)
+    assert "secret" not in str(cleanup_records[0].exception_message)

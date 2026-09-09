@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
 
-from rag_eval_api.config import Settings, get_settings
+from rag_eval_api.config import LOGGER_NAME, Settings, get_settings
 from rag_eval_api.db import (
     close_resources,
     configure_database,
@@ -28,7 +28,6 @@ from rag_eval_api.db import (
     get_redis_client,
 )
 
-LOGGER_NAME = "rag_eval_api.request"
 HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 logger = logging.getLogger(LOGGER_NAME)
 

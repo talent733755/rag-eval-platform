@@ -14,6 +14,7 @@ APP_ENV_DEVELOPMENT: Literal["development"] = "development"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_SECRET_KEY = "development-only-secret"
+LOGGER_NAME = "rag_eval_api.request"
 SUPPORTED_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"})
 
 

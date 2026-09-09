@@ -17,12 +17,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from starlette.applications import Starlette
 
-from rag_eval_api.config import Settings
+from rag_eval_api.config import LOGGER_NAME, Settings
 
 DATABASE_CONNECT_TIMEOUT_SECONDS = 5.0
 DATABASE_POOL_TIMEOUT_SECONDS = 5.0
 REDIS_SOCKET_TIMEOUT_SECONDS = 5.0
-logger = logging.getLogger("rag_eval_api.lifecycle")
+logger = logging.getLogger(LOGGER_NAME)
 
 
 def _sanitize_exception(exc: Exception) -> str:
