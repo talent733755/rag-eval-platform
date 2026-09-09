@@ -15,8 +15,11 @@
   --color-text-muted: #64748B;
   --color-border: #E2E8F0;
   --color-success: #16A34A;
+  --color-success-foreground: #166534;
   --color-warning: #D97706;
+  --color-warning-foreground: #92400E;
   --color-danger: #DC2626;
+  --color-danger-foreground: #991B1B;
   --font-ui: "Plus Jakarta Sans", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -34,27 +37,11 @@
   --color-text-muted: #94A3B8;
   --color-border: #334155;
   --color-success: #16A34A;
+  --color-success-foreground: #86EFAC;
   --color-warning: #D97706;
+  --color-warning-foreground: #FCD34D;
   --color-danger: #DC2626;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --color-canvas: #0B1220;
-    --color-surface: #111827;
-    --color-surface-elevated: #172033;
-    --color-sidebar: #08101D;
-    --color-primary: #60A5FA;
-    --color-primary-soft: #172033;
-    --color-action: #F97316;
-    --color-text: #E5E7EB;
-    --color-text-secondary: #CBD5E1;
-    --color-text-muted: #94A3B8;
-    --color-border: #334155;
-    --color-success: #16A34A;
-    --color-warning: #D97706;
-    --color-danger: #DC2626;
-  }
+  --color-danger-foreground: #FCA5A5;
 }
 
 * {

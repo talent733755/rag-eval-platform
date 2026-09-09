@@ -17,10 +17,10 @@ type StatusBadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
 };
 
 const statusStyles: Record<StatusBadgeStatus, string> = {
-  success: "border-success/30 bg-success/10 text-success",
-  warning: "border-warning/30 bg-warning/10 text-warning",
-  danger: "border-danger/30 bg-danger/10 text-danger",
-  failed: "border-danger/30 bg-danger/10 text-danger",
+  success: "border-success/30 bg-success/10 text-success-foreground",
+  warning: "border-warning/30 bg-warning/10 text-warning-foreground",
+  danger: "border-danger/30 bg-danger/10 text-danger-foreground",
+  failed: "border-danger/30 bg-danger/10 text-danger-foreground",
   info: "border-primary/30 bg-primary-soft text-primary",
   neutral: "border-border bg-canvas text-muted",
 };

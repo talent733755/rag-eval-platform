@@ -11,8 +11,11 @@ export const designTokens = {
     muted: "#64748B",
     border: "#E2E8F0",
     success: "#16A34A",
+    successForeground: "#166534",
     warning: "#D97706",
+    warningForeground: "#92400E",
     danger: "#DC2626",
+    dangerForeground: "#991B1B",
   },
   dark: {
     canvas: "#0B1220",
@@ -26,8 +29,11 @@ export const designTokens = {
     muted: "#94A3B8",
     border: "#334155",
     success: "#16A34A",
+    successForeground: "#86EFAC",
     warning: "#D97706",
+    warningForeground: "#FCD34D",
     danger: "#DC2626",
+    dangerForeground: "#FCA5A5",
   },
 } as const;
 
