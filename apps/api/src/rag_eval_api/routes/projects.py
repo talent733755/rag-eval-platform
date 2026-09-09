@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_eval_api.auth.context import RequestActor, get_current_actor
 from rag_eval_api.auth.rbac import (
     ProjectAccess,
+    recheck_project_admin_and_lock_memberships,
     require_organization_admin,
     require_project_admin,
     require_project_member,
@@ -29,12 +30,42 @@ from rag_eval_api.schemas.projects import (
 from rag_eval_api.services.audit import record_audit_event
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+PROJECT_SLUG_CONFLICT_MARKERS = (
+    "uq_projects_organization_id_slug",
+    "projects.organization_id, projects.slug",
+)
 
 
 def not_found() -> HTTPException:
     return HTTPException(
         status_code=404,
         detail={"error": {"code": "not_found", "message": "Resource not found."}},
+    )
+
+
+def project_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"error": {"code": "conflict", "message": "Project conflicts with existing data."}},
+    )
+
+
+def is_project_slug_conflict(exc: IntegrityError) -> bool:
+    """Recognize only the project organization/slug uniqueness violation."""
+
+    message = str(exc.orig).lower()
+    return any(marker in message for marker in PROJECT_SLUG_CONFLICT_MARKERS)
+
+
+def final_admin_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error": {
+                "code": "conflict",
+                "message": "A project must retain at least one administrator.",
+            }
+        },
     )
 
 
@@ -73,9 +104,24 @@ async def create_project(
         slug=payload.slug,
         description=payload.description,
     )
+    duplicate = await db_session.execute(
+        select(Project.id).where(
+            Project.organization_id == actor.organization_id,
+            Project.slug == payload.slug,
+        )
+    )
+    if duplicate.scalar_one_or_none() is not None:
+        await db_session.rollback()
+        raise project_conflict()
     db_session.add(project)
     try:
         await db_session.flush()
+    except IntegrityError as exc:
+        await db_session.rollback()
+        if not is_project_slug_conflict(exc):
+            raise
+        raise project_conflict() from exc
+    try:
         db_session.add(
             Membership(
                 organization_id=actor.organization_id,
@@ -95,12 +141,9 @@ async def create_project(
             metadata={"slug": project.slug},
         )
         await db_session.commit()
-    except IntegrityError as exc:
+    except Exception:
         await db_session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail={"error": {"code": "conflict", "message": "Project slug already exists."}},
-        ) from exc
+        raise
     return project
 
 
@@ -131,41 +174,27 @@ async def invite_project_member(
     access: ProjectAccess = Depends(require_project_admin),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> MemberInviteResponse:
-    record_audit_event(
-        db_session,
-        organization_id=access.actor.organization_id,
-        project_id=access.project.id,
-        actor_id=access.actor.user_id,
-        action="project.member.invited",
-        resource_type="project_member_invitation",
-        resource_id="pending-invitation",
-        metadata={"email": payload.email, "role": payload.role.value, "status": "pending"},
-    )
-    await db_session.commit()
+    try:
+        record_audit_event(
+            db_session,
+            organization_id=access.actor.organization_id,
+            project_id=access.project.id,
+            actor_id=access.actor.user_id,
+            action="project.member.invited",
+            resource_type="project_member_invitation",
+            resource_id="pending-invitation",
+            metadata={"email": payload.email, "role": payload.role.value, "status": "pending"},
+        )
+        await db_session.commit()
+    except Exception:
+        await db_session.rollback()
+        raise
     return MemberInviteResponse(
         project_id=access.project.id,
         email=payload.email,
         role=payload.role,
         status="pending",
     )
-
-
-async def _load_target_membership(
-    access: ProjectAccess,
-    membership_id: UUID,
-    db_session: AsyncSession,
-) -> Membership:
-    statement = select(Membership).where(
-        and_(
-            Membership.id == membership_id,
-            Membership.organization_id == access.actor.organization_id,
-            Membership.project_id == access.project.id,
-        )
-    )
-    membership = (await db_session.execute(statement)).scalar_one_or_none()
-    if membership is None:
-        raise not_found()
-    return membership
 
 
 @router.patch(
@@ -178,21 +207,34 @@ async def update_project_member(
     access: ProjectAccess = Depends(require_project_admin),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> Membership:
-    membership = await _load_target_membership(access, membership_id, db_session)
-    previous_role = membership.role
-    membership.role = payload.role
-    await db_session.flush()
-    record_audit_event(
-        db_session,
-        organization_id=access.actor.organization_id,
-        project_id=access.project.id,
-        actor_id=access.actor.user_id,
-        action="project.member.role_changed",
-        resource_type="membership",
-        resource_id=str(membership.id),
-        metadata={"from_role": previous_role.value, "to_role": payload.role.value},
+    membership, memberships = await recheck_project_admin_and_lock_memberships(
+        access, db_session, membership_id
     )
-    await db_session.commit()
+    if (
+        membership.role is MembershipRole.admin
+        and payload.role is not MembershipRole.admin
+        and sum(item.role is MembershipRole.admin for item in memberships) == 1
+    ):
+        await db_session.rollback()
+        raise final_admin_conflict()
+    previous_role = membership.role
+    try:
+        membership.role = payload.role
+        await db_session.flush()
+        record_audit_event(
+            db_session,
+            organization_id=access.actor.organization_id,
+            project_id=access.project.id,
+            actor_id=access.actor.user_id,
+            action="project.member.role_changed",
+            resource_type="membership",
+            resource_id=str(membership.id),
+            metadata={"from_role": previous_role.value, "to_role": payload.role.value},
+        )
+        await db_session.commit()
+    except Exception:
+        await db_session.rollback()
+        raise
     return membership
 
 
@@ -205,18 +247,30 @@ async def remove_project_member(
     access: ProjectAccess = Depends(require_project_admin),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> Response:
-    membership = await _load_target_membership(access, membership_id, db_session)
-    await db_session.delete(membership)
-    await db_session.flush()
-    record_audit_event(
-        db_session,
-        organization_id=access.actor.organization_id,
-        project_id=access.project.id,
-        actor_id=access.actor.user_id,
-        action="project.member.removed",
-        resource_type="membership",
-        resource_id=str(membership.id),
-        metadata={"user_id": str(membership.user_id), "role": membership.role.value},
+    membership, memberships = await recheck_project_admin_and_lock_memberships(
+        access, db_session, membership_id
     )
-    await db_session.commit()
+    if (
+        membership.role is MembershipRole.admin
+        and sum(item.role is MembershipRole.admin for item in memberships) == 1
+    ):
+        await db_session.rollback()
+        raise final_admin_conflict()
+    try:
+        await db_session.delete(membership)
+        await db_session.flush()
+        record_audit_event(
+            db_session,
+            organization_id=access.actor.organization_id,
+            project_id=access.project.id,
+            actor_id=access.actor.user_id,
+            action="project.member.removed",
+            resource_type="membership",
+            resource_id=str(membership.id),
+            metadata={"user_id": str(membership.user_id), "role": membership.role.value},
+        )
+        await db_session.commit()
+    except Exception:
+        await db_session.rollback()
+        raise
     return Response(status_code=status.HTTP_204_NO_CONTENT)

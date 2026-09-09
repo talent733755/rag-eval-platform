@@ -1,4 +1,16 @@
-"""Project and organization membership authorization dependencies."""
+"""Project and organization membership authorization dependencies.
+
+The foundation schema has project memberships but no separate organization
+membership table. Until that table exists, an actor with an ``admin``
+membership in any project belonging to an organization is treated as an
+organization administrator. Every query still scopes both the actor and the
+organization explicitly so this compatibility policy cannot cross tenants.
+
+Administrative mutation routes recheck and lock membership rows in the same
+transaction. PostgreSQL honors ``FOR UPDATE``; SQLite ignores row locks, so
+SQLite tests verify state and atomicity but cannot model production lock
+contention.
+"""
 
 from __future__ import annotations
 
@@ -40,6 +52,8 @@ async def _load_project_access(
     project_id: UUID,
     actor: RequestActor,
     db_session: AsyncSession,
+    *,
+    for_update: bool = False,
 ) -> ProjectAccess:
     statement = (
         select(Project, Membership)
@@ -57,6 +71,8 @@ async def _load_project_access(
             Membership.user_id == actor.user_id,
         )
     )
+    if for_update:
+        statement = statement.with_for_update()
     row = (await db_session.execute(statement)).first()
     if row is None:
         raise permission_denied()
@@ -85,10 +101,13 @@ async def require_project_editor(
 
 
 async def require_project_admin(
-    access: ProjectAccess = Depends(require_project_member),
+    project_id: UUID,
+    actor: RequestActor = Depends(get_current_actor),
+    db_session: AsyncSession = Depends(get_db_session),
 ) -> ProjectAccess:
     """Require project administrator access."""
 
+    access = await _load_project_access(project_id, actor, db_session, for_update=True)
     if access.membership.role is not MembershipRole.admin:
         raise permission_denied()
     return access
@@ -104,7 +123,38 @@ async def require_organization_admin(
         Membership.organization_id == actor.organization_id,
         Membership.user_id == actor.user_id,
         Membership.role == MembershipRole.admin,
-    )
+    ).with_for_update()
     if (await db_session.execute(statement)).scalar_one_or_none() is None:
         raise permission_denied()
     return actor
+
+
+async def recheck_project_admin_and_lock_memberships(
+    access: ProjectAccess,
+    db_session: AsyncSession,
+    membership_id: UUID,
+) -> tuple[Membership, list[Membership]]:
+    """Recheck the actor and lock project memberships before an admin mutation."""
+
+    statement = (
+        select(Membership)
+        .where(
+            Membership.organization_id == access.actor.organization_id,
+            Membership.project_id == access.project.id,
+        )
+        .with_for_update()
+    )
+    memberships = list((await db_session.execute(statement)).scalars().all())
+    actor_membership = next(
+        (membership for membership in memberships if membership.user_id == access.actor.user_id),
+        None,
+    )
+    if actor_membership is None or actor_membership.role is not MembershipRole.admin:
+        raise permission_denied()
+    target = next((membership for membership in memberships if membership.id == membership_id), None)
+    if target is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "not_found", "message": "Resource not found."}},
+        )
+    return target, memberships

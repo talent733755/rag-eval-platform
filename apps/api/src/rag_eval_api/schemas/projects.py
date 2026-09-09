@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from rag_eval_api.models import MembershipRole
-
-EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _strip_nonempty(value: str, field_name: str) -> str:
@@ -59,16 +56,13 @@ class MembershipResponse(BaseModel):
 
 
 class MemberInviteRequest(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
+    email: EmailStr = Field(min_length=3, max_length=320)
     role: MembershipRole
 
-    @field_validator("email")
+    @field_validator("email", mode="before")
     @classmethod
-    def validate_email(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if not EMAIL_PATTERN.fullmatch(normalized):
-            raise ValueError("email must be valid")
-        return normalized
+    def normalize_email(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class MemberInviteResponse(BaseModel):

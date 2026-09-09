@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -25,6 +25,19 @@ ADMIN_ID = UUID("00000000-0000-0000-0000-000000000102")
 EDITOR_ID = UUID("00000000-0000-0000-0000-000000000103")
 VIEWER_ID = UUID("00000000-0000-0000-0000-000000000104")
 OTHER_ORG_ADMIN_ID = UUID("00000000-0000-0000-0000-000000000105")
+
+PERMISSION_DENIED_BODY = {
+    "error": {
+        "code": "permission_denied",
+        "message": "You do not have permission to perform this action.",
+    }
+}
+CONFLICT_BODY = {
+    "error": {
+        "code": "conflict",
+        "message": "Project conflicts with existing data.",
+    }
+}
 
 
 @dataclass
@@ -141,12 +154,14 @@ async def api_environment() -> AsyncIterator[
         current_actor = RequestActor(user_id=user_id, organization_id=organization_id)
 
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application),
+        transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
         base_url="http://testserver",
     ) as client:
         yield application, client, seed, set_actor, session_factory
 
     application.dependency_overrides.clear()
+    await application.state.db_engine.dispose()
+    await application.state.redis_client.aclose()
     await engine.dispose()
 
 
@@ -245,6 +260,180 @@ async def test_project_creation_is_admin_only_and_audited(
 
 
 @pytest.mark.asyncio
+async def test_final_project_admin_cannot_demote_or_delete_self(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+) -> None:
+    _, client, seed, set_actor, session_factory = api_environment
+    set_actor(ADMIN_ID)
+
+    demotion = await client.patch(
+        f"/api/projects/{seed.project_id}/members/{seed.admin_membership_id}",
+        json={"role": "viewer"},
+    )
+    deletion = await client.delete(
+        f"/api/projects/{seed.project_id}/members/{seed.admin_membership_id}"
+    )
+
+    assert demotion.status_code == deletion.status_code == 409
+    assert demotion.json() == deletion.json() == {
+        "error": {
+            "code": "conflict",
+            "message": "A project must retain at least one administrator.",
+        }
+    }
+    async with session_factory() as session:
+        membership = await session.get(Membership, seed.admin_membership_id)
+        assert membership is not None
+        assert membership.role is MembershipRole.admin
+        assert (
+            await session.execute(
+                select(AuditEvent).where(
+                    AuditEvent.project_id == seed.project_id,
+                    AuditEvent.action.in_(["project.member.role_changed", "project.member.removed"]),
+                )
+            )
+        ).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_admin_from_another_organization_cannot_access_project(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+) -> None:
+    _, client, seed, set_actor, _ = api_environment
+    set_actor(OTHER_ORG_ADMIN_ID)
+
+    visible = await client.get("/api/projects")
+    detail = await client.get(f"/api/projects/{seed.project_id}")
+    invite = await client.post(
+        f"/api/projects/{seed.project_id}/members",
+        json={"email": "cross-org@example.com", "role": "viewer"},
+    )
+    update = await client.patch(
+        f"/api/projects/{seed.project_id}/members/{seed.viewer_membership_id}",
+        json={"role": "editor"},
+    )
+    remove = await client.delete(
+        f"/api/projects/{seed.project_id}/members/{seed.viewer_membership_id}"
+    )
+
+    assert [item["id"] for item in visible.json()] == [str(seed.other_project_id)]
+    assert detail.status_code == 403
+    assert invite.status_code == update.status_code == remove.status_code == 403
+    assert detail.json() == invite.json() == update.json() == remove.json() == PERMISSION_DENIED_BODY
+
+
+@pytest.mark.asyncio
+async def test_duplicate_project_slug_returns_conflict_without_partial_mutation(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+) -> None:
+    _, client, seed, set_actor, session_factory = api_environment
+    set_actor(ADMIN_ID)
+
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Duplicate", "slug": "main", "description": None},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == CONFLICT_BODY
+    async with session_factory() as session:
+        projects = (
+            await session.execute(
+                select(Project).where(
+                    Project.organization_id == seed.organization_id,
+                    Project.slug == "main",
+                )
+            )
+        ).scalars().all()
+        assert len(projects) == 1
+        assert (
+            await session.execute(
+                select(AuditEvent).where(AuditEvent.action == "project.created")
+            )
+        ).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_audit_integrity_failure_rolls_back_project_creation(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rag_eval_api.routes.projects as project_routes
+
+    _, client, seed, set_actor, session_factory = api_environment
+    original_record_audit_event = project_routes.record_audit_event
+
+    def record_invalid_audit_event(
+        db_session: AsyncSession,
+        *,
+        organization_id: UUID,
+        project_id: UUID | None,
+        actor_id: UUID,
+        action: str,
+        resource_type: str,
+        resource_id: str,
+        metadata: Mapping[str, object],
+    ) -> AuditEvent:
+        del project_id
+        return original_record_audit_event(
+            db_session,
+            organization_id=organization_id,
+            project_id=uuid4(),
+            actor_id=actor_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata=metadata,
+        )
+
+    monkeypatch.setattr(project_routes, "record_audit_event", record_invalid_audit_event)
+    set_actor(ADMIN_ID)
+
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Rolled back", "slug": "rolled-back", "description": None},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {"code": "internal_server_error", "message": "Internal server error"}
+    }
+    async with session_factory() as session:
+        assert (
+            await session.execute(select(Project).where(Project.slug == "rolled-back"))
+        ).scalar_one_or_none() is None
+        assert (
+            await session.execute(
+                select(Membership).where(Membership.project_id == seed.project_id)
+            )
+        ).scalars().all()
+
+
+@pytest.mark.asyncio
 async def test_member_management_requires_admin_and_writes_audit_events(
     api_environment: tuple[
         FastAPI,
@@ -296,14 +485,6 @@ async def test_member_management_requires_admin_and_writes_audit_events(
         "project.member.role_changed",
         "project.member.removed",
     }.issubset(actions)
-
-
-PERMISSION_DENIED_BODY = {
-    "error": {
-        "code": "permission_denied",
-        "message": "You do not have permission to perform this action.",
-    }
-}
 
 
 @pytest.mark.asyncio
@@ -408,7 +589,7 @@ async def test_member_mutation_validation_returns_consistent_422_error(
 
     invalid_email = await client.post(
         f"/api/projects/{seed.project_id}/members",
-        json={"email": "not-an-email", "role": "viewer"},
+        json={"email": "a@.b", "role": "viewer"},
     )
     invalid_role = await client.post(
         f"/api/projects/{seed.project_id}/members",
@@ -467,3 +648,4 @@ async def test_production_auth_boundary_returns_501_without_actor_override() -> 
         "error": {"code": "not_implemented", "message": "Authentication is not configured."}
     }
     await application.state.db_engine.dispose()
+    await application.state.redis_client.aclose()
