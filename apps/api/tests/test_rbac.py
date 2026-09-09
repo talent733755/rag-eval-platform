@@ -289,6 +289,107 @@ async def test_member_management_requires_admin_and_writes_audit_events(
     }.issubset(actions)
 
 
+PERMISSION_DENIED_BODY = {
+    "error": {
+        "code": "permission_denied",
+        "message": "You do not have permission to perform this action.",
+    }
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actor_id", "expected_status"),
+    [(ADMIN_ID, 202), (EDITOR_ID, 403), (VIEWER_ID, 403)],
+    ids=["admin", "editor", "viewer"],
+)
+async def test_invite_member_role_matrix(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+    actor_id: UUID,
+    expected_status: int,
+) -> None:
+    _, client, seed, set_actor, _ = api_environment
+    set_actor(actor_id)
+
+    response = await client.post(
+        f"/api/projects/{seed.project_id}/members",
+        json={"email": "matrix@example.com", "role": "viewer"},
+    )
+
+    assert response.status_code == expected_status
+    if expected_status == 403:
+        assert response.json() == PERMISSION_DENIED_BODY
+    else:
+        assert response.json()["status"] == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actor_id", "expected_status"),
+    [(ADMIN_ID, 200), (EDITOR_ID, 403), (VIEWER_ID, 403)],
+    ids=["admin", "editor", "viewer"],
+)
+async def test_update_member_role_matrix(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+    actor_id: UUID,
+    expected_status: int,
+) -> None:
+    _, client, seed, set_actor, _ = api_environment
+    set_actor(actor_id)
+
+    response = await client.patch(
+        f"/api/projects/{seed.project_id}/members/{seed.viewer_membership_id}",
+        json={"role": "editor"},
+    )
+
+    assert response.status_code == expected_status
+    if expected_status == 403:
+        assert response.json() == PERMISSION_DENIED_BODY
+    else:
+        assert response.json()["role"] == "editor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actor_id", "expected_status"),
+    [(ADMIN_ID, 204), (EDITOR_ID, 403), (VIEWER_ID, 403)],
+    ids=["admin", "editor", "viewer"],
+)
+async def test_remove_member_role_matrix(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+    actor_id: UUID,
+    expected_status: int,
+) -> None:
+    _, client, seed, set_actor, _ = api_environment
+    set_actor(actor_id)
+
+    response = await client.delete(
+        f"/api/projects/{seed.project_id}/members/{seed.editor_membership_id}"
+    )
+
+    assert response.status_code == expected_status
+    if expected_status == 403:
+        assert response.json() == PERMISSION_DENIED_BODY
+
+
 @pytest.mark.asyncio
 async def test_member_mutation_validation_returns_consistent_422_error(
     api_environment: tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]],
