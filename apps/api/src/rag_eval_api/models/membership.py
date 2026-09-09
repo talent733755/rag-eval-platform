@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Enum as SqlEnum
-from sqlalchemy import ForeignKey, UniqueConstraint, Uuid
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rag_eval_api.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -29,7 +29,15 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """External user identity membership scoped to one organization project."""
 
     __tablename__ = "memberships"
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_memberships_project_id_user_id"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id", "organization_id"],
+            ["projects.id", "projects.organization_id"],
+            name="fk_memberships_project_organization_projects",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("project_id", "user_id", name="uq_memberships_project_id_user_id"),
+    )
 
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"),
@@ -37,7 +45,6 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -52,8 +59,14 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
 
-    organization: Mapped[Organization] = relationship(back_populates="memberships")
-    project: Mapped[Project] = relationship(back_populates="memberships")
+    organization: Mapped[Organization] = relationship(
+        back_populates="memberships",
+        overlaps="project,memberships",
+    )
+    project: Mapped[Project] = relationship(
+        back_populates="memberships",
+        overlaps="organization,memberships",
+    )
 
     def __repr__(self) -> str:
         return f"Membership(id={self.id!r}, project_id={self.project_id!r}, user_id={self.user_id!r})"

@@ -22,6 +22,7 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "projects"
     __table_args__ = (
+        UniqueConstraint("id", "organization_id", name="uq_projects_id_organization_id"),
         UniqueConstraint("organization_id", "slug", name="uq_projects_organization_id_slug"),
         CheckConstraint("length(trim(name)) > 0", name="name_nonempty"),
         CheckConstraint("length(trim(slug)) > 0", name="slug_nonempty"),
@@ -41,8 +42,12 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
+        overlaps="organization,memberships",
     )
-    audit_events: Mapped[list[AuditEvent]] = relationship(back_populates="project")
+    audit_events: Mapped[list[AuditEvent]] = relationship(
+        back_populates="project",
+        overlaps="organization,audit_events",
+    )
 
     def __repr__(self) -> str:
         return f"Project(id={self.id!r}, organization_id={self.organization_id!r}, slug={self.slug!r})"

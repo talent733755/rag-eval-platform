@@ -35,9 +35,11 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="organization",
         cascade="all, delete-orphan",
+        overlaps="project,organization",
     )
     audit_events: Mapped[list[AuditEvent]] = relationship(
         back_populates="organization",
+        overlaps="project,audit_events",
     )
 
     def __repr__(self) -> str:

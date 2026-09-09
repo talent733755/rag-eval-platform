@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.CheckConstraint("length(trim(slug)) > 0", name="slug_nonempty"),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_projects_organization_id_organizations", ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_projects"),
+        sa.UniqueConstraint("id", "organization_id", name="uq_projects_id_organization_id"),
         sa.UniqueConstraint("organization_id", "slug", name="uq_projects_organization_id_slug"),
     )
     op.create_index("ix_projects_organization_id", "projects", ["organization_id"])
@@ -52,7 +53,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.CheckConstraint("role IN ('admin', 'editor', 'viewer')", name="membership_role"),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_memberships_organization_id_organizations", ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["project_id"], ["projects.id"], name="fk_memberships_project_id_projects", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["project_id", "organization_id"], ["projects.id", "projects.organization_id"], name="fk_memberships_project_organization_projects", ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_memberships"),
         sa.UniqueConstraint("project_id", "user_id", name="uq_memberships_project_id_user_id"),
     )
@@ -71,7 +72,7 @@ def upgrade() -> None:
         sa.Column("metadata_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_audit_events_organization_id_organizations"),
-        sa.ForeignKeyConstraint(["project_id"], ["projects.id"], name="fk_audit_events_project_id_projects", ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["project_id", "organization_id"], ["projects.id", "projects.organization_id"], name="fk_audit_events_project_organization_projects", ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id", name="pk_audit_events"),
     )
     op.create_index("ix_audit_events_actor_id", "audit_events", ["actor_id"])
@@ -88,9 +89,32 @@ def upgrade() -> None:
         "audit_events",
         ["project_id", "created_at"],
     )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION prevent_audit_event_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RAISE EXCEPTION 'audit_events are append-only'
+                USING ERRCODE = 'restrict_violation';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER audit_events_append_only
+        BEFORE UPDATE OR DELETE ON audit_events
+        FOR EACH ROW
+        EXECUTE FUNCTION prevent_audit_event_mutation()
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS audit_events_append_only ON audit_events")
+    op.execute("DROP FUNCTION IF EXISTS prevent_audit_event_mutation()")
     op.drop_index("ix_audit_events_project_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_organization_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_project_id", table_name="audit_events")

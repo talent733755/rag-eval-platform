@@ -61,8 +61,8 @@ def test_projects_and_memberships_are_isolated_by_organization(db: Session) -> N
                 role=MembershipRole.editor,
             ),
             Membership(
-                organization=first_organization,
-                project=first_project,
+                organization=second_organization,
+                project=second_project,
                 user_id=users[2],
                 role=MembershipRole.viewer,
             ),
@@ -77,9 +77,53 @@ def test_projects_and_memberships_are_isolated_by_organization(db: Session) -> N
     assert {membership.role for membership in first_project.memberships} == {
         MembershipRole.admin,
         MembershipRole.editor,
-        MembershipRole.viewer,
     }
-    assert second_project.memberships == []
+    assert {membership.role for membership in second_project.memberships} == {MembershipRole.viewer}
+
+
+def test_membership_cannot_pair_project_with_another_organization(db: Session) -> None:
+    first_organization = Organization(name="First Organization", slug="first")
+    second_organization = Organization(name="Second Organization", slug="second")
+    first_project = Project(name="First Project", slug="first", organization=first_organization)
+    second_project = Project(name="Second Project", slug="second", organization=second_organization)
+    db.add_all([first_organization, second_organization, first_project, second_project])
+    db.commit()
+
+    db.add(
+        Membership(
+            organization_id=first_organization.id,
+            project_id=second_project.id,
+            user_id=uuid4(),
+            role=MembershipRole.viewer,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_audit_event_cannot_pair_project_with_another_organization(db: Session) -> None:
+    first_organization = Organization(name="First Organization", slug="first")
+    second_organization = Organization(name="Second Organization", slug="second")
+    first_project = Project(name="First Project", slug="first", organization=first_organization)
+    second_project = Project(name="Second Project", slug="second", organization=second_organization)
+    db.add_all([first_organization, second_organization, first_project, second_project])
+    db.commit()
+
+    db.add(
+        AuditEvent(
+            organization_id=first_organization.id,
+            project_id=second_project.id,
+            actor_id=uuid4(),
+            action="project.created",
+            resource_type="project",
+            resource_id=str(second_project.id),
+            metadata_json={},
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
 
 
 def test_project_slug_is_unique_within_an_organization_but_not_across_organizations(
@@ -171,6 +215,46 @@ def test_audit_event_preserves_actor_timestamp_and_project_scope(db: Session) ->
     assert event.created_at.utcoffset() == UTC.utcoffset(event.created_at)
     assert event.project_id == project.id
     assert event.metadata_json == {"source": "test"}
+
+
+def test_audit_event_update_and_delete_are_rejected_and_record_remains(db: Session) -> None:
+    organization = Organization(name="Organization", slug="organization")
+    project = Project(name="Project", slug="project", organization=organization)
+    event = AuditEvent(
+        organization=organization,
+        project=project,
+        actor_id=uuid4(),
+        action="project.created",
+        resource_type="project",
+        resource_id=str(project.id),
+        metadata_json={"source": "test"},
+    )
+    db.add(event)
+    db.commit()
+    event_id = event.id
+
+    event.action = "project.deleted"
+    with pytest.raises(ValueError, match="append-only"):
+        db.commit()
+    db.rollback()
+    persisted_event = db.get(AuditEvent, event_id)
+    assert persisted_event is not None
+    assert persisted_event.action == "project.created"
+
+    db.delete(persisted_event)
+    with pytest.raises(ValueError, match="append-only"):
+        db.commit()
+    db.rollback()
+    assert db.get(AuditEvent, event_id) is not None
+
+
+def test_audit_event_created_at_uses_database_default() -> None:
+    from rag_eval_api.models import AuditEvent
+
+    server_default = AuditEvent.__table__.c.created_at.server_default
+
+    assert server_default is not None
+    assert str(server_default.arg) == "CURRENT_TIMESTAMP"
 
 
 def test_timestamp_defaults_are_utc_aware(db: Session) -> None:

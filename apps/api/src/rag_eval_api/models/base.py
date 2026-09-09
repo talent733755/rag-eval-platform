@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, MetaData, Uuid, func
+from sqlalchemy import DateTime, MetaData, Uuid, text
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql.type_api import TypeEngine
@@ -71,12 +71,12 @@ class TimestampMixin:
         UTCDateTime(),
         nullable=False,
         default=utc_now,
-        server_default=func.now(),
+        server_default=text("CURRENT_TIMESTAMP"),
     )
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         nullable=False,
         default=utc_now,
         onupdate=utc_now,
-        server_default=func.now(),
+        server_default=text("CURRENT_TIMESTAMP"),
     )
