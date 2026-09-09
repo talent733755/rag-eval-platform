@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -40,15 +41,35 @@ def redis_client() -> FakeRedisClient:
 
 
 @pytest.fixture
+def app() -> Iterator[FastAPI]:
+    from rag_eval_api.main import create_app
+
+    application = create_app()
+    yield application
+    application.dependency_overrides.clear()
+
+
+@pytest.fixture
 def client(
+    app: FastAPI,
     db_session: FakeDatabaseSession,
     redis_client: FakeRedisClient,
 ) -> Iterator[TestClient]:
     from rag_eval_api.db import get_db_session, get_redis_client
-    from rag_eval_api.main import app
 
     app.dependency_overrides[get_db_session] = lambda: db_session
     app.dependency_overrides[get_redis_client] = lambda: redis_client
     with TestClient(app) as test_client:
         yield test_client
-    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_factory(app: FastAPI) -> Iterator[Any]:
+    from rag_eval_api.db import get_db_session, get_redis_client
+
+    def factory(db_session: Any, redis_client: Any) -> TestClient:
+        app.dependency_overrides[get_db_session] = lambda: db_session
+        app.dependency_overrides[get_redis_client] = lambda: redis_client
+        return TestClient(app)
+
+    yield factory
