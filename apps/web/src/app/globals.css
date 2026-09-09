@@ -9,6 +9,7 @@
   --color-sidebar: #0F172A;
   --color-primary: #2563EB;
   --color-primary-soft: #EFF6FF;
+  --color-focus: #1D4ED8;
   --color-action: #F97316;
   --color-text: #0F172A;
   --color-text-secondary: #475569;
@@ -31,6 +32,7 @@
   --color-sidebar: #08101D;
   --color-primary: #60A5FA;
   --color-primary-soft: #172033;
+  --color-focus: #BFDBFE;
   --color-action: #F97316;
   --color-text: #E5E7EB;
   --color-text-secondary: #CBD5E1;
@@ -69,7 +71,8 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  outline: 3px solid #1D4ED8;
+  outline: 3px solid var(--color-focus);
   outline-offset: 2px;
 }
 
