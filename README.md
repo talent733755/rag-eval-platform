@@ -2,6 +2,41 @@
 
 开源的 RAG 评测数据工程与检索链路实验平台。
 
+## 本地开发
+
+### 前置条件
+
+请先安装以下工具：
+
+- Node.js 20+ 与 Corepack 管理的 pnpm
+- Python 3.12+ 与 uv
+- Docker Engine 或 Docker Desktop，以及 Docker Compose
+
+### 初始化
+
+在仓库根目录执行：
+
+```bash
+make install
+cp .env.example .env
+make infra-up
+```
+
+本地服务启动后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。
+
+### 质量检查
+
+提交变更前执行以下四个质量命令：
+
+```bash
+make lint
+make typecheck
+make test
+make build
+```
+
+使用 `make infra-down` 停止本地 PostgreSQL 和 Redis 服务。`.env`、本地生成的密钥和其他生成的敏感信息永远不会提交到版本库；请勿将真实凭据写入 `.env.example`。
+
 ## 产品定位
 
 面向 RAG/AI 工程师，从企业原始文档自动构建可追溯、可审核、可持续迭代的评测集，并用于评估、对比和诊断完整的 RAG Pipeline。

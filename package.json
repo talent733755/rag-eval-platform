@@ -1,0 +1,12 @@
+{
+  "name": "rag-eval-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "lint": "pnpm --if-present --recursive lint",
+    "typecheck": "pnpm --if-present --recursive typecheck",
+    "test": "pnpm --if-present --recursive test",
+    "build": "pnpm --if-present --recursive build"
+  }
+}

@@ -5,11 +5,16 @@
 .env.*
 !.env.example
 node_modules/
+.pnpm-store/
 dist/
 build/
+.next/
 coverage/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .venv/
 venv/
+*.log
