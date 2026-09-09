@@ -2,42 +2,73 @@
 
 set -Eeuo pipefail
 
-readonly deadline=$((SECONDS + 30))
-readonly probe_timeout_seconds=2
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'wait-for-services.sh requires python3 for a monotonic wall-clock deadline\n' >&2
+  exit 2
+fi
+
+readonly script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly repo_root="$(CDPATH= cd -- "${script_dir}/.." && pwd -P)"
+readonly compose_file="${repo_root}/docker-compose.yml"
+readonly probe_timeout_ms=2000
+readonly cleanup_reserve_ms=250
+
+clock_ms() {
+  python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'
+}
+
+readonly start_ms="$(clock_ms)"
+readonly deadline_ms=$((start_ms + 30000))
 postgres_ready=false
 redis_ready=false
 
+before_deadline() {
+  (( $(clock_ms) < deadline_ms - cleanup_reserve_ms ))
+}
+
+kill_process_tree() {
+  local parent_pid="$1"
+  local child_pid
+
+  if command -v pgrep >/dev/null 2>&1; then
+    while read -r child_pid; do
+      [[ -n "$child_pid" ]] || continue
+      kill_process_tree "$child_pid"
+    done < <(pgrep -P "$parent_pid" 2>/dev/null || true)
+  fi
+
+  kill -KILL "$parent_pid" 2>/dev/null || true
+}
+
+stop_probe() {
+  local probe_pid="$1"
+
+  kill_process_tree "$probe_pid"
+  wait "$probe_pid" 2>/dev/null || true
+}
+
 run_probe() {
-  local requested_timeout_seconds="$1"
-  shift
+  local now_ms remaining_ms timeout_ms probe_deadline_ms probe_pid
 
-  local remaining_seconds=$((deadline - SECONDS))
-  (( remaining_seconds > 0 )) || return 124
+  now_ms="$(clock_ms)"
+  remaining_ms=$((deadline_ms - now_ms - cleanup_reserve_ms))
+  (( remaining_ms > 0 )) || return 124
 
-  local timeout_seconds="$requested_timeout_seconds"
-  (( remaining_seconds < timeout_seconds )) && timeout_seconds="$remaining_seconds"
+  timeout_ms="$probe_timeout_ms"
+  (( remaining_ms < timeout_ms )) && timeout_ms="$remaining_ms"
+  probe_deadline_ms=$((now_ms + timeout_ms))
 
   "$@" &
-  local probe_pid=$!
-  local watchdog_ticks=$((timeout_seconds * 10))
+  probe_pid=$!
 
-  for ((tick = 0; tick < watchdog_ticks; tick++)); do
-    if ! kill -0 "$probe_pid" 2>/dev/null; then
-      if wait "$probe_pid"; then
-        return 0
-      fi
-      return 1
+  while kill -0 "$probe_pid" 2>/dev/null; do
+    now_ms="$(clock_ms)"
+    if (( now_ms >= probe_deadline_ms || now_ms >= deadline_ms - cleanup_reserve_ms )); then
+      stop_probe "$probe_pid"
+      return 124
     fi
     sleep 0.1
   done
-
-  if kill -0 "$probe_pid" 2>/dev/null; then
-    kill "$probe_pid" 2>/dev/null || true
-    sleep 0.1
-    kill -KILL "$probe_pid" 2>/dev/null || true
-    wait "$probe_pid" 2>/dev/null || true
-    return 124
-  fi
 
   if wait "$probe_pid"; then
     return 0
@@ -46,24 +77,26 @@ run_probe() {
 }
 
 postgres_probe() {
-  docker compose exec -T postgres sh -c \
+  exec docker compose --project-directory "$repo_root" --file "$compose_file" exec -T postgres sh -c \
     'pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"' \
     >/dev/null 2>&1
 }
 
 postgres_is_ready() {
-  run_probe "$probe_timeout_seconds" postgres_probe
+  run_probe postgres_probe
 }
 
 redis_probe() {
-  docker compose exec -T redis redis-cli ping 2>/dev/null | grep -qx 'PONG'
+  exec docker compose --project-directory "$repo_root" --file "$compose_file" exec -T redis sh -c \
+    'test "$(redis-cli ping)" = PONG' \
+    >/dev/null 2>&1
 }
 
 redis_is_ready() {
-  run_probe "$probe_timeout_seconds" redis_probe
+  run_probe redis_probe
 }
 
-while (( SECONDS < deadline )); do
+while before_deadline; do
   if [[ "$postgres_ready" != true ]] && postgres_is_ready; then
     postgres_ready=true
   fi
@@ -76,9 +109,8 @@ while (( SECONDS < deadline )); do
     exit 0
   fi
 
-  remaining=$((deadline - SECONDS))
-  if (( remaining > 0 )); then
-    sleep 1
+  if before_deadline; then
+    sleep 0.1
   fi
 done
 
