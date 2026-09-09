@@ -123,7 +123,7 @@ async def require_organization_admin(
         Membership.organization_id == actor.organization_id,
         Membership.user_id == actor.user_id,
         Membership.role == MembershipRole.admin,
-    ).with_for_update()
+    ).limit(1).with_for_update()
     if (await db_session.execute(statement)).scalar_one_or_none() is None:
         raise permission_denied()
     return actor

@@ -9,6 +9,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -78,6 +79,11 @@ async def api_environment() -> AsyncIterator[
         organization = Organization(name="Acme", slug="acme")
         other_organization = Organization(name="Other", slug="other")
         project = Project(name="Main", slug="main", organization=organization)
+        second_admin_project = Project(
+            name="Second admin project",
+            slug="second-admin-project",
+            organization=organization,
+        )
         other_project = Project(name="Other project", slug="other-project", organization=other_organization)
         admin_membership = Membership(
             organization=organization,
@@ -97,15 +103,23 @@ async def api_environment() -> AsyncIterator[
             user_id=VIEWER_ID,
             role=MembershipRole.viewer,
         )
+        second_admin_membership = Membership(
+            organization=organization,
+            project=second_admin_project,
+            user_id=ADMIN_ID,
+            role=MembershipRole.admin,
+        )
         seed_session.add_all(
             [
                 organization,
                 other_organization,
                 project,
+                second_admin_project,
                 other_project,
                 admin_membership,
                 editor_membership,
                 viewer_membership,
+                second_admin_membership,
                 Membership(
                     organization=other_organization,
                     project=other_project,
@@ -125,16 +139,14 @@ async def api_environment() -> AsyncIterator[
             viewer_membership_id=viewer_membership.id,
         )
 
-    settings = Settings.model_validate(
-        {
-            "DATABASE_URL": "postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval",
-            "REDIS_URL": DEFAULT_REDIS_URL,
-            "APP_ENV": "development",
-            "CORS_ORIGINS": ["http://localhost:3000"],
-            "LOG_LEVEL": "INFO",
-            "SECRET_KEY": DEFAULT_SECRET_KEY,
-            "_env_file": None,
-        }
+    settings = Settings(
+        database_url="postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval",
+        redis_url=DEFAULT_REDIS_URL,
+        app_env="development",
+        cors_origins=["http://localhost:3000"],
+        log_level="INFO",
+        secret_key=SecretStr(DEFAULT_SECRET_KEY),
+        _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
     current_actor = RequestActor(user_id=VIEWER_ID, organization_id=seed.organization_id)
@@ -153,16 +165,17 @@ async def api_environment() -> AsyncIterator[
         )
         current_actor = RequestActor(user_id=user_id, organization_id=organization_id)
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
-        base_url="http://testserver",
-    ) as client:
-        yield application, client, seed, set_actor, session_factory
-
-    application.dependency_overrides.clear()
-    await application.state.db_engine.dispose()
-    await application.state.redis_client.aclose()
-    await engine.dispose()
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
+            base_url="http://testserver",
+        ) as client:
+            yield application, client, seed, set_actor, session_factory
+    finally:
+        application.dependency_overrides.clear()
+        await application.state.db_engine.dispose()
+        await application.state.redis_client.aclose()
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -257,6 +270,27 @@ async def test_project_creation_is_admin_only_and_audited(
         assert audit.actor_id == ADMIN_ID
         assert audit.organization_id == seed.organization_id
         assert membership.role is MembershipRole.admin
+
+
+@pytest.mark.asyncio
+async def test_organization_admin_with_multiple_project_admin_memberships_can_create(
+    api_environment: tuple[
+        FastAPI,
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+    ],
+) -> None:
+    _, client, _, set_actor, _ = api_environment
+    set_actor(ADMIN_ID)
+
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Multiple admin memberships", "slug": "multiple-admin-memberships"},
+    )
+
+    assert response.status_code == 201
 
 
 @pytest.mark.asyncio
@@ -625,27 +659,27 @@ async def test_missing_route_returns_consistent_404_error(
 async def test_production_auth_boundary_returns_501_without_actor_override() -> None:
     from rag_eval_api.main import create_app
 
-    settings = Settings.model_validate(
-        {
-            "DATABASE_URL": "postgresql+asyncpg://rag_eval:real-password@db.example/rag_eval",
-            "REDIS_URL": "redis://redis.example:6379/0",
-            "APP_ENV": "production",
-            "CORS_ORIGINS": [],
-            "LOG_LEVEL": "INFO",
-            "SECRET_KEY": "a" * 32,
-            "_env_file": None,
-        }
+    settings = Settings(
+        database_url="postgresql+asyncpg://rag_eval:real-password@db.example/rag_eval",
+        redis_url="redis://redis.example:6379/0",
+        app_env="production",
+        cors_origins=[],
+        log_level="INFO",
+        secret_key=SecretStr("a" * 32),
+        _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=application),
-        base_url="http://testserver",
-    ) as client:
-        response = await client.get("/api/projects")
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get("/api/projects")
+    finally:
+        await application.state.db_engine.dispose()
+        await application.state.redis_client.aclose()
 
     assert response.status_code == 501
     assert response.json() == {
         "error": {"code": "not_implemented", "message": "Authentication is not configured."}
     }
-    await application.state.db_engine.dispose()
-    await application.state.redis_client.aclose()

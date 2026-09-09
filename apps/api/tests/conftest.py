@@ -1,9 +1,11 @@
+import asyncio
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 
 class FakeDatabaseSession:
@@ -48,22 +50,24 @@ def app() -> Iterator[FastAPI]:
         DEFAULT_SECRET_KEY,
         Settings,
     )
+    from rag_eval_api.db import close_resources
     from rag_eval_api.main import create_app
 
-    settings = Settings.model_validate(
-        {
-            "DATABASE_URL": DEFAULT_DATABASE_URL,
-            "REDIS_URL": DEFAULT_REDIS_URL,
-            "APP_ENV": "development",
-            "CORS_ORIGINS": ["http://localhost:3000"],
-            "LOG_LEVEL": "INFO",
-            "SECRET_KEY": DEFAULT_SECRET_KEY,
-            "_env_file": None,
-        }
+    settings = Settings(
+        database_url=DEFAULT_DATABASE_URL,
+        redis_url=DEFAULT_REDIS_URL,
+        app_env="development",
+        cors_origins=["http://localhost:3000"],
+        log_level="INFO",
+        secret_key=SecretStr(DEFAULT_SECRET_KEY),
+        _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
-    yield application
-    application.dependency_overrides.clear()
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
+        asyncio.run(close_resources(application))
 
 
 @pytest.fixture
