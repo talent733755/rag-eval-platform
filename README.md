@@ -24,7 +24,9 @@ cp .env.example .env
 make infra-up
 ```
 
-本地服务启动后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。
+`make infra-up` 只启动 PostgreSQL 和 Redis，不会启动 API 或 Web。待后续任务加入 `apps/api` 和 `apps/web` 后，还需要分别执行各自的 API/Web 启动命令；完成并启动这两个应用后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。
+
+当 API 运行在 Compose 容器中时，Compose 配置必须将 `COMPOSE_DATABASE_URL` 和 `COMPOSE_REDIS_URL` 注入容器内的 `DATABASE_URL` 和 `REDIS_URL`。这两个 Compose 连接串使用内部服务 DNS 名称 `postgres` 和 `redis`，容器间连接不能使用 `localhost`。
 
 ### 质量检查
 
@@ -37,7 +39,7 @@ make test
 make build
 ```
 
-使用 `make infra-down` 停止本地 PostgreSQL 和 Redis 服务。`.env`、本地生成的密钥和其他生成的敏感信息永远不会提交到版本库；请勿将真实凭据写入 `.env.example`。
+使用 `make infra-down`（即 `docker compose down`）停止整个 Compose 项目，而不只是 PostgreSQL 和 Redis。非开发环境启动 API 前，必须将 `SECRET_KEY` 的本地占位符替换为生成的密钥。`.env`、本地生成的密钥和其他生成的敏感信息永远不会提交到版本库；请勿将真实凭据写入 `.env.example`。
 
 ## 产品定位
 
