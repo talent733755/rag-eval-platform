@@ -10,6 +10,7 @@
 
 - Node.js 20+ 与 Corepack 管理的 pnpm
 - Python 3.12+ 与 uv
+- GNU Make
 - Docker Engine 或 Docker Desktop，以及 Docker Compose
 
 ### 初始化（后续基础设施任务完成后）
