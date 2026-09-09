@@ -204,6 +204,15 @@ async def test_project_creation_is_admin_only_and_audited(
         json={"name": "Denied", "slug": "denied", "description": None},
     )
     assert denied.status_code == 403
+    assert denied.json() == PERMISSION_DENIED_BODY
+
+    set_actor(VIEWER_ID)
+    viewer_denied = await client.post(
+        "/api/projects",
+        json={"name": "Viewer denied", "slug": "viewer-denied", "description": None},
+    )
+    assert viewer_denied.status_code == 403
+    assert viewer_denied.json() == PERMISSION_DENIED_BODY
 
     set_actor(ADMIN_ID)
     created = await client.post(
