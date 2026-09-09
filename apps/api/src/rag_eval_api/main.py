@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
 
@@ -27,6 +28,7 @@ from rag_eval_api.db import (
     get_db_session,
     get_redis_client,
 )
+from rag_eval_api.routes.projects import router as projects_router
 
 HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 logger = logging.getLogger(LOGGER_NAME)
@@ -148,6 +150,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=_error_payload("validation_error", "Request validation failed"),
         )
 
+    @application.exception_handler(HTTPException)
+    async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        del request
+        if exc.status_code == 403:
+            return JSONResponse(status_code=403, content=_error_payload(
+                "permission_denied", "You do not have permission to perform this action."
+            ))
+        if isinstance(exc.detail, dict) and "error" in exc.detail:
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        error_codes = {404: "not_found", 405: "method_not_allowed", 409: "conflict", 501: "not_implemented"}
+        messages = {
+            404: "Resource not found.",
+            405: "Method not allowed.",
+            409: "Request conflicts with existing data.",
+            501: "Not implemented.",
+        }
+        code = error_codes.get(exc.status_code, "http_error")
+        message = messages.get(exc.status_code, str(exc.detail))
+        return JSONResponse(status_code=exc.status_code, content=_error_payload(code, message))
+
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.error(
@@ -164,6 +186,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status_code=500,
             content=_error_payload("internal_server_error", "Internal server error"),
         )
+
+    application.include_router(projects_router)
 
     @application.get("/health/live", response_model=None)
     async def liveness() -> dict[str, str]:
