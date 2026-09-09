@@ -18,8 +18,11 @@ const config: Config = {
         muted: "var(--color-text-muted)",
         border: "var(--color-border)",
         success: "var(--color-success)",
+        "success-foreground": "var(--color-success-foreground)",
         warning: "var(--color-warning)",
+        "warning-foreground": "var(--color-warning-foreground)",
         danger: "var(--color-danger)",
+        "danger-foreground": "var(--color-danger-foreground)",
       },
       fontFamily: {
         sans: ["var(--font-ui)"],
