@@ -12,9 +12,10 @@ RUN pip install --no-cache-dir --disable-pip-version-check uv==0.7.13
 
 # Keep dependency installation separate from application source for build caching.
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY apps/api/src ./src
+RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
