@@ -12,9 +12,11 @@
 - Python 3.12+ 与 uv
 - Docker Engine 或 Docker Desktop，以及 Docker Compose
 
-### 初始化
+### 初始化（后续基础设施任务完成后）
 
-在仓库根目录执行：
+当前仓库只包含工作区命令和文档配置；`docker-compose.yml`、`apps/api` 和 `apps/web` 将由后续基础设施与应用基础任务提供。因此，在这些任务完成前，`make infra-up` 不能启动服务，下面列出的 API/Web 地址也尚未提供。
+
+完成后续基础设施任务后，在仓库根目录执行：
 
 ```bash
 make install
@@ -26,7 +28,7 @@ make infra-up
 
 ### 质量检查
 
-提交变更前执行以下四个质量命令：
+提交变更前执行以下四个质量命令。它们是本项目要求的质量门禁；待 `apps/api` 和 `apps/web` 加入后即可完整执行：
 
 ```bash
 make lint
