@@ -81,6 +81,55 @@ def test_projects_and_memberships_are_isolated_by_organization(db: Session) -> N
     assert {membership.role for membership in second_project.memberships} == {MembershipRole.viewer}
 
 
+def test_one_organization_keeps_memberships_isolated_between_two_projects(db: Session) -> None:
+    organization = Organization(name="Organization", slug="organization")
+    first_project = Project(name="First Project", slug="first", organization=organization)
+    second_project = Project(name="Second Project", slug="second", organization=organization)
+    admin_id = UUID("00000000-0000-0000-0000-000000000011")
+    editor_id = UUID("00000000-0000-0000-0000-000000000012")
+    viewer_id = UUID("00000000-0000-0000-0000-000000000013")
+    db.add_all(
+        [
+            organization,
+            first_project,
+            second_project,
+            Membership(
+                organization=organization,
+                project=first_project,
+                user_id=admin_id,
+                role=MembershipRole.admin,
+            ),
+            Membership(
+                organization=organization,
+                project=first_project,
+                user_id=editor_id,
+                role=MembershipRole.editor,
+            ),
+            Membership(
+                organization=organization,
+                project=second_project,
+                user_id=viewer_id,
+                role=MembershipRole.viewer,
+            ),
+        ]
+    )
+    db.commit()
+
+    assert {project.slug for project in organization.projects} == {"first", "second"}
+    assert {membership.role for membership in first_project.memberships} == {
+        MembershipRole.admin,
+        MembershipRole.editor,
+    }
+    assert {membership.role for membership in second_project.memberships} == {MembershipRole.viewer}
+    assert {membership.user_id for membership in first_project.memberships} == {
+        admin_id,
+        editor_id,
+    }
+    assert {membership.user_id for membership in second_project.memberships} == {viewer_id}
+    assert all(membership.project_id == first_project.id for membership in first_project.memberships)
+    assert all(membership.project_id == second_project.id for membership in second_project.memberships)
+
+
 def test_membership_cannot_pair_project_with_another_organization(db: Session) -> None:
     first_organization = Organization(name="First Organization", slug="first")
     second_organization = Organization(name="Second Organization", slug="second")
