@@ -88,7 +88,7 @@ def test_production_settings_reject_default_secret() -> None:
     from rag_eval_api.config import Settings
 
     try:
-        Settings(APP_ENV="production", SECRET_KEY="development-only-secret")
+        Settings.model_validate({"APP_ENV": "production", "SECRET_KEY": "development-only-secret"})
     except ValueError as error:
         assert "SECRET_KEY" in str(error)
     else:
@@ -98,9 +98,11 @@ def test_production_settings_reject_default_secret() -> None:
 def test_settings_accept_comma_separated_cors_origins() -> None:
     from rag_eval_api.config import Settings
 
-    settings = Settings(
-        CORS_ORIGINS="http://localhost:3000, https://example.com",
-        _env_file=None,
+    settings = Settings.model_validate(
+        {
+            "CORS_ORIGINS": "http://localhost:3000, https://example.com",
+            "_env_file": None,
+        }
     )
 
     assert settings.cors_origins == ["http://localhost:3000", "https://example.com"]
@@ -110,13 +112,13 @@ def test_settings_reject_invalid_log_level() -> None:
     from rag_eval_api.config import Settings
 
     with pytest.raises(ValueError, match="LOG_LEVEL"):
-        Settings(LOG_LEVEL="verbose", _env_file=None)
+        Settings.model_validate({"LOG_LEVEL": "verbose", "_env_file": None})
 
 
 def test_settings_normalize_log_level() -> None:
     from rag_eval_api.config import Settings
 
-    settings = Settings(LOG_LEVEL="warning", _env_file=None)
+    settings = Settings.model_validate({"LOG_LEVEL": "warning", "_env_file": None})
 
     assert settings.log_level == "WARNING"
 
@@ -125,9 +127,9 @@ def test_settings_reject_invalid_connection_schemes() -> None:
     from rag_eval_api.config import Settings
 
     with pytest.raises(ValueError, match="DATABASE_URL"):
-        Settings(DATABASE_URL="mysql://localhost/db", _env_file=None)
+        Settings.model_validate({"DATABASE_URL": "mysql://localhost/db", "_env_file": None})
     with pytest.raises(ValueError, match="REDIS_URL"):
-        Settings(REDIS_URL="http://localhost:6379", _env_file=None)
+        Settings.model_validate({"REDIS_URL": "http://localhost:6379", "_env_file": None})
 
 
 def test_settings_uses_repository_root_env_file() -> None:
@@ -178,10 +180,10 @@ def test_log_formatter_emits_structured_fields() -> None:
     from rag_eval_api.main import JsonLogFormatter
 
     record = logging.LogRecord("test", logging.INFO, __file__, 1, "request.completed", (), None)
-    record.event = "request.completed"  # type: ignore[attr-defined]
-    record.method = "GET"  # type: ignore[attr-defined]
-    record.path = "/health/live"  # type: ignore[attr-defined]
-    record.status_code = 200  # type: ignore[attr-defined]
+    setattr(record, "event", "request.completed")
+    setattr(record, "method", "GET")
+    setattr(record, "path", "/health/live")
+    setattr(record, "status_code", 200)
 
     payload = json.loads(JsonLogFormatter().format(record))
 
@@ -259,8 +261,12 @@ async def test_resource_cleanup_closes_redis_when_database_dispose_fails(
         logger.propagate = False
 
     assert redis_client.closed
-    cleanup_records = [record for record in caplog.records if record.event == "resource.cleanup.failed"]
+    cleanup_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "resource.cleanup.failed"
+    ]
     assert cleanup_records
     assert all(record.name == logger.name for record in cleanup_records)
     assert any(isinstance(handler.formatter, JsonLogFormatter) for handler in logger.handlers)
-    assert "secret" not in str(cleanup_records[0].exception_message)
+    assert "secret" not in str(getattr(cleanup_records[0], "exception_message", ""))

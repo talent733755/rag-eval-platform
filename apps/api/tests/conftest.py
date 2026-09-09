@@ -50,14 +50,16 @@ def app() -> Iterator[FastAPI]:
     )
     from rag_eval_api.main import create_app
 
-    settings = Settings(
-        DATABASE_URL=DEFAULT_DATABASE_URL,
-        REDIS_URL=DEFAULT_REDIS_URL,
-        APP_ENV="development",
-        CORS_ORIGINS=["http://localhost:3000"],
-        LOG_LEVEL="INFO",
-        SECRET_KEY=DEFAULT_SECRET_KEY,
-        _env_file=None,
+    settings = Settings.model_validate(
+        {
+            "DATABASE_URL": DEFAULT_DATABASE_URL,
+            "REDIS_URL": DEFAULT_REDIS_URL,
+            "APP_ENV": "development",
+            "CORS_ORIGINS": ["http://localhost:3000"],
+            "LOG_LEVEL": "INFO",
+            "SECRET_KEY": DEFAULT_SECRET_KEY,
+            "_env_file": None,
+        }
     )
     application = create_app(settings=settings)
     yield application

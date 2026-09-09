@@ -70,6 +70,36 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
         return f"AuditEvent(id={self.id!r}, action={self.action!r}, actor_id={self.actor_id!r})"
 
 
+def _validate_audit_event_tenant(target: AuditEvent) -> None:
+    organization = target.organization
+    project = target.project
+    project_organization = project.organization if project is not None else None
+    if organization is None or project is None:
+        return
+    if project_organization is not None:
+        mismatched = project_organization.id != organization.id
+    else:
+        mismatched = (
+            organization.id is not None
+            and project.organization_id is not None
+            and project.organization_id != organization.id
+        )
+    if mismatched:
+        raise ValueError("organization and project must belong to the same tenant")
+
+
+@event.listens_for(AuditEvent, "before_insert")
+def _validate_audit_event_before_insert(mapper: object, connection: object, target: AuditEvent) -> None:
+    del mapper, connection
+    _validate_audit_event_tenant(target)
+
+
+@event.listens_for(AuditEvent, "before_update")
+def _validate_audit_event_before_update(mapper: object, connection: object, target: AuditEvent) -> None:
+    del mapper, connection
+    _validate_audit_event_tenant(target)
+
+
 @event.listens_for(AuditEvent, "before_update")
 def _reject_audit_event_update(mapper: object, connection: object, target: AuditEvent) -> None:
     del mapper, connection, target

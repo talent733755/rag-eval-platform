@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.sql.elements import conv
 
 revision: str = "0001_foundation"
 down_revision: str | None = None
@@ -19,8 +20,8 @@ def upgrade() -> None:
         sa.Column("slug", sa.String(length=100), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.CheckConstraint("length(trim(name)) > 0", name="name_nonempty"),
-        sa.CheckConstraint("length(trim(slug)) > 0", name="slug_nonempty"),
+        sa.CheckConstraint("length(trim(name)) > 0", name=conv("ck_organizations_name_nonempty")),
+        sa.CheckConstraint("length(trim(slug)) > 0", name=conv("ck_organizations_slug_nonempty")),
         sa.PrimaryKeyConstraint("id", name="pk_organizations"),
         sa.UniqueConstraint("slug", name="uq_organizations_slug"),
     )
@@ -34,8 +35,8 @@ def upgrade() -> None:
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.CheckConstraint("length(trim(name)) > 0", name="name_nonempty"),
-        sa.CheckConstraint("length(trim(slug)) > 0", name="slug_nonempty"),
+        sa.CheckConstraint("length(trim(name)) > 0", name=conv("ck_projects_name_nonempty")),
+        sa.CheckConstraint("length(trim(slug)) > 0", name=conv("ck_projects_slug_nonempty")),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_projects_organization_id_organizations", ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_projects"),
         sa.UniqueConstraint("id", "organization_id", name="uq_projects_id_organization_id"),
@@ -51,7 +52,7 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=6), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.CheckConstraint("role IN ('admin', 'editor', 'viewer')", name="membership_role"),
+        sa.CheckConstraint("role IN ('admin', 'editor', 'viewer')", name=conv("ck_memberships_membership_role")),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_memberships_organization_id_organizations", ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["project_id", "organization_id"], ["projects.id", "projects.organization_id"], name="fk_memberships_project_organization_projects", ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id", name="pk_memberships"),
@@ -91,7 +92,7 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE OR REPLACE FUNCTION prevent_audit_event_mutation()
+        CREATE OR REPLACE FUNCTION public.rag_eval_prevent_audit_event_mutation()
         RETURNS trigger
         LANGUAGE plpgsql
         AS $$
@@ -105,16 +106,30 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TRIGGER audit_events_append_only
-        BEFORE UPDATE OR DELETE ON audit_events
+        BEFORE UPDATE OR DELETE ON public.audit_events
         FOR EACH ROW
-        EXECUTE FUNCTION prevent_audit_event_mutation()
+        EXECUTE FUNCTION public.rag_eval_prevent_audit_event_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER audit_events_truncate_guard
+        BEFORE TRUNCATE ON public.audit_events
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION public.rag_eval_prevent_audit_event_mutation()
+        """
+    )
+    op.execute(
+        """
+        REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_events FROM PUBLIC
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS audit_events_append_only ON audit_events")
-    op.execute("DROP FUNCTION IF EXISTS prevent_audit_event_mutation()")
+    op.execute("DROP TRIGGER IF EXISTS audit_events_truncate_guard ON public.audit_events")
+    op.execute("DROP TRIGGER IF EXISTS audit_events_append_only ON public.audit_events")
+    op.execute("DROP FUNCTION IF EXISTS public.rag_eval_prevent_audit_event_mutation()")
     op.drop_index("ix_audit_events_project_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_organization_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_project_id", table_name="audit_events")

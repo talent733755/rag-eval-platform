@@ -1,5 +1,7 @@
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,9 +24,12 @@ def db() -> Iterator[Session]:
     engine = create_engine("sqlite:///:memory:")
 
     @event.listens_for(engine, "connect")
-    def enable_sqlite_foreign_keys(dbapi_connection: object, connection_record: object) -> None:
+    def enable_sqlite_foreign_keys(
+        dbapi_connection: sqlite3.Connection,
+        connection_record: object,
+    ) -> None:
         del connection_record
-        cursor = dbapi_connection.cursor()  # type: ignore[union-attr]
+        cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
@@ -151,6 +156,50 @@ def test_membership_cannot_pair_project_with_another_organization(db: Session) -
     db.rollback()
 
 
+def test_membership_relationships_reject_mismatched_organization_and_project(
+    db: Session,
+) -> None:
+    first_organization = Organization(name="First Organization", slug="first")
+    second_organization = Organization(name="Second Organization", slug="second")
+    first_project = Project(name="First Project", slug="first", organization=first_organization)
+    second_project = Project(name="Second Project", slug="second", organization=second_organization)
+    db.add_all([first_organization, second_organization, first_project, second_project])
+    db.commit()
+
+    db.add(
+        Membership(
+            organization=first_organization,
+            project=second_project,
+            user_id=uuid4(),
+            role=MembershipRole.viewer,
+        )
+    )
+    with pytest.raises(ValueError, match="organization and project must belong to the same tenant"):
+        db.commit()
+    db.rollback()
+
+
+def test_membership_relationship_updates_reject_mismatched_tenant(db: Session) -> None:
+    first_organization = Organization(name="First Organization", slug="first")
+    second_organization = Organization(name="Second Organization", slug="second")
+    first_project = Project(name="First Project", slug="first", organization=first_organization)
+    second_project = Project(name="Second Project", slug="second", organization=second_organization)
+    membership = Membership(
+        organization=first_organization,
+        project=first_project,
+        user_id=uuid4(),
+        role=MembershipRole.viewer,
+    )
+    db.add_all([first_organization, second_organization, first_project, second_project, membership])
+    db.commit()
+
+    membership.organization = second_organization
+    membership.project = first_project
+    with pytest.raises(ValueError, match="organization and project must belong to the same tenant"):
+        db.commit()
+    db.rollback()
+
+
 def test_audit_event_cannot_pair_project_with_another_organization(db: Session) -> None:
     first_organization = Organization(name="First Organization", slug="first")
     second_organization = Organization(name="Second Organization", slug="second")
@@ -171,6 +220,30 @@ def test_audit_event_cannot_pair_project_with_another_organization(db: Session) 
         )
     )
     with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_audit_relationships_reject_mismatched_organization_and_project(db: Session) -> None:
+    first_organization = Organization(name="First Organization", slug="first")
+    second_organization = Organization(name="Second Organization", slug="second")
+    first_project = Project(name="First Project", slug="first", organization=first_organization)
+    second_project = Project(name="Second Project", slug="second", organization=second_organization)
+    db.add_all([first_organization, second_organization, first_project, second_project])
+    db.commit()
+
+    db.add(
+        AuditEvent(
+            organization=first_organization,
+            project=second_project,
+            actor_id=uuid4(),
+            action="project.created",
+            resource_type="project",
+            resource_id=str(second_project.id),
+            metadata_json={},
+        )
+    )
+    with pytest.raises(ValueError, match="organization and project must belong to the same tenant"):
         db.commit()
     db.rollback()
 
@@ -204,7 +277,7 @@ def test_membership_role_values_are_restricted_by_database_constraint(db: Sessio
             organization=organization,
             project=project,
             user_id=uuid4(),
-            role="owner",  # type: ignore[arg-type]
+            role=cast(MembershipRole, "owner"),
         )
     )
 
