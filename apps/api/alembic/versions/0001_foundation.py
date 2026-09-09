@@ -92,6 +92,43 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        CREATE OR REPLACE FUNCTION public.rag_eval_set_updated_at()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            NEW.updated_at = CURRENT_TIMESTAMP;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER organizations_set_updated_at
+        BEFORE UPDATE ON organizations
+        FOR EACH ROW
+        EXECUTE FUNCTION public.rag_eval_set_updated_at()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER projects_set_updated_at
+        BEFORE UPDATE ON projects
+        FOR EACH ROW
+        EXECUTE FUNCTION public.rag_eval_set_updated_at()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER memberships_set_updated_at
+        BEFORE UPDATE ON memberships
+        FOR EACH ROW
+        EXECUTE FUNCTION public.rag_eval_set_updated_at()
+        """
+    )
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION public.rag_eval_prevent_audit_event_mutation()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -106,7 +143,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TRIGGER audit_events_append_only
-        BEFORE UPDATE OR DELETE ON public.audit_events
+        BEFORE UPDATE OR DELETE ON audit_events
         FOR EACH ROW
         EXECUTE FUNCTION public.rag_eval_prevent_audit_event_mutation()
         """
@@ -114,22 +151,26 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TRIGGER audit_events_truncate_guard
-        BEFORE TRUNCATE ON public.audit_events
+        BEFORE TRUNCATE ON audit_events
         FOR EACH STATEMENT
         EXECUTE FUNCTION public.rag_eval_prevent_audit_event_mutation()
         """
     )
     op.execute(
         """
-        REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_events FROM PUBLIC
+        REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_events FROM PUBLIC
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS audit_events_truncate_guard ON public.audit_events")
-    op.execute("DROP TRIGGER IF EXISTS audit_events_append_only ON public.audit_events")
+    op.execute("DROP TRIGGER IF EXISTS audit_events_truncate_guard ON audit_events")
+    op.execute("DROP TRIGGER IF EXISTS audit_events_append_only ON audit_events")
     op.execute("DROP FUNCTION IF EXISTS public.rag_eval_prevent_audit_event_mutation()")
+    op.execute("DROP TRIGGER IF EXISTS memberships_set_updated_at ON memberships")
+    op.execute("DROP TRIGGER IF EXISTS projects_set_updated_at ON projects")
+    op.execute("DROP TRIGGER IF EXISTS organizations_set_updated_at ON organizations")
+    op.execute("DROP FUNCTION IF EXISTS public.rag_eval_set_updated_at()")
     op.drop_index("ix_audit_events_project_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_organization_id_created_at", table_name="audit_events")
     op.drop_index("ix_audit_events_project_id", table_name="audit_events")
