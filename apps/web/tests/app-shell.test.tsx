@@ -32,6 +32,21 @@ describe("AppShell mobile navigation", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
 
+  it("preserves project context on the shell brand link", () => {
+    window.history.replaceState({}, "", "/?project=22222222-2222-4222-8222-222222222222");
+
+    render(
+      <AppShell>
+        <p>内容</p>
+      </AppShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "RAG Eval Platform" })).toHaveAttribute(
+      "href",
+      "/?project=22222222-2222-4222-8222-222222222222",
+    );
+  });
+
   it("opens an accessible modal drawer, closes on Escape, and restores focus", () => {
     render(
       <AppShell>

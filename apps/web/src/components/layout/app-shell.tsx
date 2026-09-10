@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
@@ -9,6 +8,7 @@ import type { KeyboardEvent } from "react";
 import { ProjectSwitcher } from "./project-switcher";
 import { SidebarNav } from "./sidebar-nav";
 import { UserMenu } from "./user-menu";
+import { ProjectLink } from "../ui/project-link";
 import type { UserRole } from "../../lib/auth/permissions";
 
 export const DEFAULT_DEVELOPMENT_ROLE: UserRole = "admin";
@@ -28,13 +28,13 @@ function SidebarContent({
     <div className="flex h-full flex-col">
       {showBrand && (
         <div className="flex h-16 shrink-0 items-center border-b border-white/10 px-5">
-          <Link
+          <ProjectLink
             className="rounded-md text-sm font-semibold tracking-wide text-white focus-visible:outline-white"
             href="/"
             onClick={onNavigate}
           >
             RAG Eval Platform
-          </Link>
+          </ProjectLink>
         </div>
       )}
       <SidebarNav onNavigate={onNavigate} pathname={pathname} role={role} />

@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectSwitcher } from "../src/components/layout/project-switcher";
@@ -112,6 +113,28 @@ describe("permission-aware navigation", () => {
       );
     });
   });
+
+  it("synchronizes the selected project with browser back and forward navigation", async () => {
+    window.history.replaceState({}, "", `/?project=${projects[0].id}`);
+    vi.stubGlobal("fetch", vi.fn());
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
+
+    render(<ProjectSwitcher />);
+    const switcher = await screen.findByRole("combobox", { name: "当前项目" });
+
+    window.history.pushState({}, "", `/?project=${projects[1].id}`);
+    fireEvent(window, new PopStateEvent("popstate"));
+    await waitFor(() => expect(switcher).toHaveValue(projects[1].id));
+
+    window.history.pushState({}, "", "/?project=33333333-3333-4333-8333-333333333333");
+    fireEvent(window, new PopStateEvent("popstate"));
+    expect(await screen.findByRole("status")).toHaveTextContent("当前项目不可用");
+
+    window.history.pushState({}, "", `/?project=${projects[0].id}`);
+    fireEvent(window, new PopStateEvent("popstate"));
+    const restoredSwitcher = await screen.findByRole("combobox", { name: "当前项目" });
+    await waitFor(() => expect(restoredSwitcher).toHaveValue(projects[0].id));
+  });
 });
 
 describe("project switcher", () => {
@@ -123,6 +146,7 @@ describe("project switcher", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("shows loading and then the projects returned by the API", async () => {
@@ -185,6 +209,70 @@ describe("project switcher", () => {
     expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
   });
 
+  it("times out a hung request within the configured bound", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockImplementation((_input, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")));
+      });
+    });
+
+    render(<ProjectSwitcher requestTimeoutMs={5} maxAttempts={1} />);
+    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("项目加载失败");
+  });
+
+  it("retries a finite number of failed requests and exposes Retry", async () => {
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error("temporary 1"))
+      .mockRejectedValueOnce(new Error("temporary 2"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(projects), { status: 200 }));
+
+    const first = render(<ProjectSwitcher retryDelayMs={0} />);
+    expect(await screen.findByRole("combobox", { name: "当前项目" })).toHaveValue(projects[0].id);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    first.unmount();
+
+    vi.mocked(fetch).mockRejectedValue(new Error("down"));
+    render(<ProjectSwitcher retryDelayMs={0} maxAttempts={1} />);
+    const retryButton = await screen.findByRole("button", { name: "重试项目加载" });
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
+    fireEvent.click(retryButton);
+    expect(await screen.findByRole("combobox", { name: "当前项目" })).toBeVisible();
+  });
+
+  it("does not retry after an unmount cancellation", async () => {
+    let rejectRequest: (reason?: unknown) => void = () => undefined;
+    vi.mocked(fetch).mockReturnValue(
+      new Promise<Response>((_resolve, reject) => {
+        rejectRequest = reject;
+      }),
+    );
+
+    const { unmount } = render(<ProjectSwitcher retryDelayMs={0} />);
+    unmount();
+    rejectRequest({ name: "AbortError" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("single-flights the project request under React StrictMode", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
+
+    render(
+      <StrictMode>
+        <ProjectSwitcher />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole("combobox", { name: "当前项目" })).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("does not select the first project when the query project is unavailable", async () => {
     window.history.replaceState({}, "", `/?project=33333333-3333-4333-8333-333333333333`);
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
@@ -226,11 +314,18 @@ describe("user menu popover", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
-    expect(screen.getByRole("dialog", { name: "用户菜单" })).toBeVisible();
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const dialog = screen.getByRole("dialog", { name: "用户菜单" });
+    expect(dialog).toBeVisible();
+    expect(dialog).toHaveFocus();
+    expect(screen.getByRole("button", { name: "关闭用户菜单" })).toHaveAttribute("aria-expanded", "true");
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "用户菜单" })).not.toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "打开用户菜单" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开用户菜单" }));
+    expect(screen.getByRole("dialog", { name: "用户菜单" })).toBeVisible();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "用户菜单" })).not.toBeInTheDocument();
   });
 });
