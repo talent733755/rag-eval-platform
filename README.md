@@ -8,8 +8,8 @@
 
 请先安装以下工具：
 
-- Node.js 20+ 与 Corepack 管理的 pnpm
-- Python 3.12+ 与 uv
+- Node.js `>=20.0.0 <25.0.0` 与 Corepack 管理的 pnpm
+- Python `>=3.12,<3.13`（Python 3.12.x）与 uv
 - GNU Make
 - Docker Engine 或 Docker Desktop，以及 Docker Compose
 
@@ -36,12 +36,22 @@ cp .env.example .env
 make infra-up
 ```
 
-`make infra-up` 只启动 PostgreSQL 和 Redis。启动 API 和 Web 开发服务：
+`make infra-up` 只启动 PostgreSQL 和 Redis。API 和 Web 开发服务分别在两个终端启动。
+
+终端 1：启动 API（仅绑定本机回环地址）：
 
 ```bash
-uv run --directory apps/api uvicorn rag_eval_api.main:app --reload --host 0.0.0.0 --port 8000
+uv run --directory apps/api uvicorn rag_eval_api.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+终端 2：启动 Web：
+
+```bash
 corepack pnpm --dir apps/web dev
 ```
+
+API 的本机开发命令默认不会暴露到局域网。Compose、反向代理或公网部署应使用各自的
+网络、端口映射和 TLS/访问控制配置，不要把本机开发命令直接当作公网启动方案。
 
 也可以在完成 `.env` 配置后使用 `docker compose up -d` 启动 Compose 中定义的全部服务。
 
