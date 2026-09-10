@@ -2,30 +2,28 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
-const navigation = [
-  { label: "工作台", href: "/", active: true },
-  {
-    label: "数据资产",
-    items: ["文档库", "评测集", "审核队列"],
-  },
-  {
-    label: "评测实验",
-    items: ["Pipeline 接入", "实验任务", "运行记录"],
-  },
-  {
-    label: "分析诊断",
-    items: ["指标看板", "Trace 分析", "失败案例"],
-  },
-  {
-    label: "系统管理",
-    items: ["模型与服务", "项目与成员"],
-  },
-] as const;
+import { ProjectSwitcher } from "./project-switcher";
+import { SidebarNav } from "./sidebar-nav";
+import { UserMenu } from "./user-menu";
+import type { UserRole } from "../../lib/auth/permissions";
 
-function SidebarContent({ onNavigate, showBrand = true }: { onNavigate?: () => void; showBrand?: boolean }) {
+export const DEFAULT_DEVELOPMENT_ROLE: UserRole = "admin";
+
+function SidebarContent({
+  onNavigate,
+  pathname,
+  role,
+  showBrand = true,
+}: {
+  onNavigate?: () => void;
+  pathname: string;
+  role: UserRole;
+  showBrand?: boolean;
+}) {
   return (
     <div className="flex h-full flex-col">
       {showBrand && (
@@ -39,52 +37,17 @@ function SidebarContent({ onNavigate, showBrand = true }: { onNavigate?: () => v
           </Link>
         </div>
       )}
-      <nav aria-label="主导航" className="flex-1 overflow-y-auto px-3 py-5">
-        <ul className="space-y-5">
-          {navigation.map((section) => (
-            <li key={section.label}>
-              {"items" in section ? (
-                <>
-                  <p className="px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    {section.label}
-                  </p>
-                  <ul className="mt-2 space-y-1">
-                    {section.items.map((item) => (
-                      <li key={item}>
-                        <a
-                          className="block rounded-md px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-white"
-                          href="#"
-                          onClick={onNavigate}
-                        >
-                          {item}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <a
-                  aria-current="page"
-                  className="block rounded-md border-l-2 border-primary bg-white/10 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-white/15 focus-visible:outline-white"
-                  href={section.href}
-                  onClick={onNavigate}
-                >
-                  {section.label}
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <div className="border-t border-white/10 px-5 py-4 text-xs text-slate-400">
-        <p>当前项目</p>
-        <p className="mt-1 truncate font-medium text-slate-200">示例评测项目</p>
-      </div>
+      <SidebarNav onNavigate={onNavigate} pathname={pathname} role={role} />
+      <ProjectSwitcher />
     </div>
   );
 }
 
-export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
+export function AppShell({
+  children,
+  role = DEFAULT_DEVELOPMENT_ROLE,
+}: Readonly<{ children: ReactNode; role?: UserRole }>) {
+  const pathname = usePathname() ?? "/";
   const [drawerOpen, setDrawerOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -140,7 +103,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="min-h-screen bg-canvas text-text">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-sidebar bg-sidebar md:block" aria-label="桌面侧边导航">
-        <SidebarContent />
+        <SidebarContent pathname={pathname} role={role} />
       </aside>
 
       {drawerOpen && (
@@ -177,7 +140,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
               </button>
             </div>
             <div className="min-h-0 flex-1">
-              <SidebarContent onNavigate={closeDrawer} showBrand={false} />
+              <SidebarContent onNavigate={closeDrawer} pathname={pathname} role={role} showBrand={false} />
             </div>
           </aside>
         </div>
@@ -202,7 +165,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
             <div className="hidden min-w-0 items-center gap-2 text-sm sm:flex">
               <span className="font-medium text-text">示例组织</span>
               <span aria-hidden="true" className="text-muted">/</span>
-              <span className="truncate text-muted">示例评测项目</span>
+              <span className="truncate text-muted">项目上下文</span>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -220,13 +183,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
             >
               通知
             </button>
-            <button
-              aria-label="打开用户菜单"
-              className="rounded-md border border-border px-3 py-2 text-sm font-medium text-text hover:bg-canvas"
-              type="button"
-            >
-              用户
-            </button>
+            <UserMenu />
           </div>
         </header>
         <main className="px-4 py-6 sm:px-6 sm:py-8 lg:px-8">{children}</main>

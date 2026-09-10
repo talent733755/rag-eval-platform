@@ -25,6 +25,11 @@ cp .env.example .env
 make infra-up
 ```
 
+Web 壳层通过 `GET /api/projects` 加载当前 actor 可见的项目。可用
+`NEXT_PUBLIC_API_BASE_URL` 指向 API 地址；未设置时默认为
+`http://localhost:8000`。项目选择保存在 URL 的 `project` 查询参数中，API
+加载失败或 URL 中的项目不可见时不会自动切换到其他项目。
+
 `make infra-up` 只启动 PostgreSQL 和 Redis，不会启动 API 或 Web。待后续任务加入 `apps/api` 和 `apps/web` 后，还需要分别执行各自的 API/Web 启动命令；完成并启动这两个应用后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。
 
 当 API 运行在 Compose 容器中时，Compose 配置必须将 `COMPOSE_DATABASE_URL` 和 `COMPOSE_REDIS_URL` 注入容器内的 `DATABASE_URL` 和 `REDIS_URL`。这两个 Compose 连接串使用内部服务 DNS 名称 `postgres` 和 `redis`，容器间连接不能使用 `localhost`。
