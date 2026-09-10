@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   getProjectIdFromSearch,
@@ -44,7 +44,38 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 100;
+const MAX_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_MAX_ATTEMPTS = 5;
+const MAX_RETRY_DELAY_MS = 5_000;
 const pendingRequests = new Map<string, SharedRequest>();
+
+class ProjectHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Project request failed with status ${status}`);
+    this.name = "ProjectHttpError";
+  }
+}
+
+class ProjectResponseError extends Error {
+  constructor() {
+    super("Project response could not be decoded");
+    this.name = "ProjectResponseError";
+  }
+}
+
+class MalformedProjectResponseError extends Error {
+  constructor(index: number) {
+    super(`Project response entry ${index} is malformed`);
+    this.name = "MalformedProjectResponseError";
+  }
+}
+
+class ProjectTimeoutError extends Error {
+  constructor() {
+    super("Project request timed out");
+    this.name = "ProjectTimeoutError";
+  }
+}
 
 export function ProjectSwitcher({
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
@@ -53,16 +84,16 @@ export function ProjectSwitcher({
 }: ProjectSwitcherProps) {
   const projectSearch = useProjectSearch();
   const endpoint = getProjectsEndpoint();
+  const requestOptions = useMemo(
+    () => normalizeRequestOptions({ maxAttempts, requestTimeoutMs, retryDelayMs }),
+    [maxAttempts, requestTimeoutMs, retryDelayMs],
+  );
   const [retryNonce, setRetryNonce] = useState(0);
   const [state, setState] = useState<ProjectState>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
-    const request = acquireProjectRequest(endpoint, {
-      maxAttempts,
-      requestTimeoutMs,
-      retryDelayMs,
-    });
+    const request = acquireProjectRequest(endpoint, requestOptions);
 
     setState({ status: "loading" });
     void request.promise
@@ -96,14 +127,14 @@ export function ProjectSwitcher({
           return;
         }
 
-        setState({ status: "error", message: "项目加载失败，请检查 API 服务后重试。" });
+        setState({ status: "error", message: getProjectErrorMessage(error) });
       });
 
     return () => {
       cancelled = true;
       request.release();
     };
-  }, [endpoint, maxAttempts, requestTimeoutMs, retryDelayMs, retryNonce]);
+  }, [endpoint, requestOptions, retryNonce]);
 
   useEffect(() => {
     if (state.status !== "ready" && state.status !== "invalid-selection") {
@@ -268,7 +299,7 @@ async function loadProjects(
     try {
       return await requestProjectsOnce(endpoint, signal, options.requestTimeoutMs);
     } catch (error: unknown) {
-      if (signal.aborted || isAbortError(error) || isMalformedProjectError(error)) {
+      if (signal.aborted || !isRetryableProjectError(error)) {
         throw error;
       }
       if (attempt === options.maxAttempts) {
@@ -293,9 +324,15 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
 
   const operation = fetch(endpoint, { signal: attemptController.signal }).then(async (response) => {
     if (!response.ok) {
-      throw new Error(`Project request failed with status ${response.status}`);
+      throw new ProjectHttpError(response.status);
     }
-    return parseProjects(await response.json());
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ProjectResponseError();
+    }
+    return parseProjects(payload);
   });
   const abort = new Promise<never>((_resolve, reject) => {
     if (attemptController.signal.aborted) {
@@ -309,7 +346,7 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
     return await Promise.race([operation, abort]);
   } catch (error: unknown) {
     if (timedOut) {
-      throw new Error("Project request timed out");
+      throw new ProjectTimeoutError();
     }
     throw error;
   } finally {
@@ -318,7 +355,7 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
   }
 }
 
-function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+export function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return Promise.reject(createAbortError());
   }
@@ -327,15 +364,29 @@ function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(createAbortError());
-      },
-      { once: true },
-    );
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(createAbortError());
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -353,9 +404,7 @@ function parseProjects(payload: unknown): Project[] {
       record.id.length === 0 ||
       record.name.length === 0
     ) {
-      const error = new Error(`Project response entry ${index} is malformed`);
-      error.name = "MalformedProjectResponseError";
-      throw error;
+      throw new MalformedProjectResponseError(index);
     }
 
     return { id: record.id, name: record.name };
@@ -366,12 +415,57 @@ function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
 }
 
-function isMalformedProjectError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "name" in error && error.name === "MalformedProjectResponseError";
+function isRetryableProjectError(error: unknown): boolean {
+  if (isAbortError(error) || error instanceof MalformedProjectResponseError || error instanceof ProjectResponseError) {
+    return false;
+  }
+  if (error instanceof ProjectHttpError) {
+    return error.status === 408 || error.status === 429 || (error.status >= 500 && error.status !== 501);
+  }
+  return error instanceof ProjectTimeoutError || error instanceof Error;
 }
 
 function createAbortError(): Error {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   return error;
+}
+
+function getProjectErrorMessage(error: unknown): string {
+  if (error instanceof ProjectHttpError) {
+    if (error.status === 408 || error.status === 429 || (error.status >= 500 && error.status !== 501)) {
+      return `项目加载失败（HTTP ${error.status}），请稍后重试。`;
+    }
+    return `项目加载失败（HTTP ${error.status}），请检查权限或请求配置。`;
+  }
+  if (error instanceof ProjectTimeoutError) {
+    return "项目加载超时，请检查 API 服务后重试。";
+  }
+  return "项目加载失败，请检查 API 服务后重试。";
+}
+
+function normalizeRequestOptions(options: RequestOptions): RequestOptions {
+  return {
+    maxAttempts: normalizeMaxAttempts(options.maxAttempts),
+    requestTimeoutMs: normalizeNonNegativeOption(
+      options.requestTimeoutMs,
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS,
+    ),
+    retryDelayMs: normalizeNonNegativeOption(options.retryDelayMs, DEFAULT_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS),
+  };
+}
+
+function normalizeMaxAttempts(value: number): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    return DEFAULT_MAX_ATTEMPTS;
+  }
+  return Math.min(Math.max(value, 1), MAX_MAX_ATTEMPTS);
+}
+
+function normalizeNonNegativeOption(value: number, fallback: number, maximum: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return Math.min(value, maximum);
 }

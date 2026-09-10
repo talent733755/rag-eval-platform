@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ProjectSwitcher } from "../src/components/layout/project-switcher";
+import { ProjectSwitcher, waitBeforeRetry } from "../src/components/layout/project-switcher";
 import { SidebarNav } from "../src/components/layout/sidebar-nav";
 import { UserMenu } from "../src/components/layout/user-menu";
 import { EmptyState } from "../src/components/ui/empty-state";
@@ -147,6 +147,7 @@ describe("project switcher", () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("shows loading and then the projects returned by the API", async () => {
@@ -189,6 +190,27 @@ describe("project switcher", () => {
     expect(window.location.search).toContain(projects[1].id);
   });
 
+  it.each([400, 401, 403, 404, 422, 501])(
+    "does not retry non-recoverable HTTP %s responses",
+    async (status) => {
+      vi.mocked(fetch).mockResolvedValue(new Response("", { status }));
+
+      render(<ProjectSwitcher maxAttempts={3} retryDelayMs={0} />);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(`HTTP ${status}`);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([408, 429, 500, 503])("retries recoverable HTTP %s responses", async (status) => {
+    vi.mocked(fetch).mockResolvedValue(new Response("", { status }));
+
+    render(<ProjectSwitcher maxAttempts={2} retryDelayMs={0} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(`HTTP ${status}`);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("shows an explicit empty state when the actor has no projects", async () => {
     vi.mocked(fetch).mockResolvedValue(new Response("[]", { status: 200 }));
 
@@ -221,7 +243,43 @@ describe("project switcher", () => {
     await vi.advanceTimersByTimeAsync(5);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("项目加载失败");
+    expect(screen.getByRole("alert")).toHaveTextContent("项目加载超时");
+  });
+
+  it("falls back to safe defaults for invalid runtime request options", async () => {
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error("temporary 1"))
+      .mockRejectedValueOnce(new Error("temporary 2"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(projects), { status: 200 }));
+
+    render(
+      <ProjectSwitcher
+        maxAttempts={Number.NaN}
+        requestTimeoutMs={Number.POSITIVE_INFINITY}
+        retryDelayMs={-1}
+      />,
+    );
+
+    expect(await screen.findByRole("combobox", { name: "当前项目" })).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("clamps maxAttempts to at least one request", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("down"));
+
+    render(<ProjectSwitcher maxAttempts={0} retryDelayMs={0} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("项目加载失败");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps maxAttempts at the safe upper bound", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("down"));
+
+    render(<ProjectSwitcher maxAttempts={999} retryDelayMs={0} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("项目加载失败");
+    expect(fetch).toHaveBeenCalledTimes(5);
   });
 
   it("retries a finite number of failed requests and exposes Retry", async () => {
@@ -258,6 +316,16 @@ describe("project switcher", () => {
     await Promise.resolve();
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the retry abort listener after the wait resolves", async () => {
+    const controller = new AbortController();
+    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener");
+
+    await waitBeforeRetry(1, controller.signal);
+    controller.abort();
+
+    expect(removeEventListener).toHaveBeenCalled();
   });
 
   it("single-flights the project request under React StrictMode", async () => {
