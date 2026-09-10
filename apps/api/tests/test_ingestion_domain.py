@@ -54,7 +54,12 @@ def test_idempotency_replay_is_allowed_but_fingerprint_conflict_is_rejected() ->
 
     with pytest.raises(IdempotencyConflict):
         ensure_idempotency(scope, "fingerprint-b", "fingerprint-a")
-    assert {"duplicate_document", "idempotency_conflict"} <= INGESTION_ERROR_CODES
+    assert {
+        "duplicate_document",
+        "idempotency_conflict",
+        "parse_timeout",
+        "parser_sandbox_unavailable",
+    } <= INGESTION_ERROR_CODES
 
 
 def test_lease_claim_heartbeat_and_fencing_reject_stale_workers() -> None:

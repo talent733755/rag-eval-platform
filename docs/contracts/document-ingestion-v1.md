@@ -21,6 +21,10 @@ upper bounds:
 | Normalized paragraphs per version | 100,000 |
 | Canonical chunk characters | 2,000 |
 | PDF parser wall clock | 10 seconds |
+| PDF object count | 100,000 |
+| PDF decoded stream bytes | 100 MiB |
+| PDF recursion depth | 100 |
+| PDF recursion objects | 100,000 |
 | DOCX ZIP entries | 10,000 |
 | DOCX uncompressed bytes | 100 MiB |
 | DOCX compression ratio | 100:1 |
@@ -55,8 +59,10 @@ secrets. Object storage can be added later behind the same protocol.
 `ParserRegistry` accepts only `.pdf`, `.docx`, `.md`/`.markdown`, and `.txt`.
 The extension, declared MIME (when supplied), and content signature must agree.
 Unsupported input is `unsupported_type`; a validly identified but malformed
-document is `parse_failed`; a decoded size, page, paragraph, ZIP, XML, or wall
-clock limit is `size_exceeded`.
+document is `parse_failed`; a decoded size, page, paragraph, ZIP, XML, object,
+or stream limit is `size_exceeded`. A parser wall-clock deadline is
+`parse_timeout`; inability to start the required parser sandbox is
+`parser_sandbox_unavailable`.
 
 Each parser returns a `ParseResult`:
 
@@ -86,8 +92,9 @@ DOCX chunks carry `paragraph`, and Markdown chunks carry `line`; chunking adds
 are omitted, ordinals are contiguous, and no original filename is copied into
 the output.
 
-PDF parsing bounds page count, decoded normalized characters, and wall-clock
-checks between pages. DOCX parsing validates the ZIP before `python-docx`:
+PDF parsing bounds page count, object count, decoded stream bytes, recursion
+depth/object count, decoded normalized characters, and wall-clock checks
+between pages. DOCX parsing validates the ZIP before `python-docx`:
 absolute paths, `..` components, symlink entries, entry count, aggregate
 uncompressed bytes, compression ratio, and XML nesting depth are rejected.
 The built-ins do not resolve external entities or perform network requests.
@@ -95,13 +102,18 @@ Deployments processing untrusted files must additionally run the API/parser in
 a non-privileged, resource-limited container or equivalent sandbox; the
 in-process parser is not a substitute for OS-level isolation.
 
-The public registry uses `ParserRunner` for PDF and DOCX by default. The runner
-uses a disposable non-root process, disables network socket creation, applies a
-hard timeout and CPU limit, and terminates/kills work that exceeds the bound.
-Linux production deployments may require the address-space limit profile. If a
-platform cannot provide the configured CPU/memory profile, production settings
-fail closed. This runner is the parser boundary for the next worker phase; it
-does not itself implement a worker, upload route, or upload-to-parse workflow.
+The public registry uses `ParserRunner` for PDF and DOCX by default. In
+development, the runner may use a disposable process fallback with process
+limits where available and Python-level socket denial; this fallback is not OS
+network isolation. Production and `PARSER_REQUIRE_RESOURCE_LIMITS=true` require
+an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
+non-root, no-network, CPU, and memory limits (for example an approved
+`unshare` or `bwrap` profile). If those capabilities are unavailable, settings
+fail closed. Hard timeouts terminate the process group and map to
+`parse_timeout`; EOF/crash/invalid child output maps to
+`parser_sandbox_unavailable`. This runner is the parser boundary for the next
+worker phase; it does not itself implement a worker, upload route, or
+upload-to-parse workflow.
 
 ## Tenant and resource identity
 
@@ -199,6 +211,8 @@ redacted, and safe to show to an operator.
 | --- | --- | --- |
 | `unsupported_type` | Extension/signature/MIME is not allowlisted | no |
 | `size_exceeded` | Upload or decoded content exceeds a configured bound | no |
+| `parse_timeout` | Parser exceeded its wall-clock deadline | yes |
+| `parser_sandbox_unavailable` | Required parser sandbox could not be started or exited unexpectedly | depends |
 | `checksum_mismatch` | Stored bytes do not match the declared digest | no |
 | `parse_failed` | Parser rejected or could not safely normalize input | depends |
 | `provider_not_configured` | Candidate provider is intentionally disabled | no; `blocked` |

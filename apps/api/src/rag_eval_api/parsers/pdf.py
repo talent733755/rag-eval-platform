@@ -8,7 +8,7 @@ import time
 from pypdf import PdfReader
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, StreamObject
 
-from rag_eval_api.parsers.errors import MalformedDocumentError, ParserLimitExceeded
+from rag_eval_api.parsers.errors import MalformedDocumentError, ParserLimitExceeded, ParserTimeout
 from rag_eval_api.parsers.models import ParseResult, ParserLimits
 from rag_eval_api.parsers.protocol import normalize_text
 from rag_eval_api.parsers.text import _finish_chunks
@@ -30,7 +30,7 @@ class PdfParser:
             decoded_stream_bytes = 0
             for page_number, page in enumerate(reader.pages, start=1):
                 if time.monotonic() - started > limits.max_pdf_wall_clock_seconds:
-                    raise ParserLimitExceeded("PDF parsing exceeded the wall-clock limit")
+                    raise ParserTimeout("PDF parsing exceeded the wall-clock limit")
                 contents = page.get_contents()
                 if contents is not None:
                     decoded_stream_bytes += len(contents.get_data())

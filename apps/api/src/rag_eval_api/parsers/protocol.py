@@ -69,24 +69,26 @@ def iter_utf8_lines(data: bytes, *, max_decoded_characters: int) -> Iterator[tup
     line_number = 1
     for start in range(0, len(data), 64 * 1024):
         try:
-            buffer += decoder.decode(data[start : start + 64 * 1024], final=False)
+            decoded = decoder.decode(data[start : start + 64 * 1024], final=False)
         except UnicodeDecodeError as exc:
             raise MalformedDocumentError("text is not valid UTF-8") from exc
-        decoded_characters += len(buffer)
-        if decoded_characters > max_decoded_characters or len(buffer) > max_decoded_characters:
+        decoded_characters += len(decoded)
+        if decoded_characters > max_decoded_characters:
             raise ParserLimitExceeded("normalized characters exceed the configured limit")
+        buffer += decoded
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
             yield line.rstrip("\r"), line_number
             line_number += 1
     try:
-        buffer += decoder.decode(b"", final=True)
+        decoded = decoder.decode(b"", final=True)
     except UnicodeDecodeError as exc:
         raise MalformedDocumentError("text is not valid UTF-8") from exc
+    decoded_characters += len(decoded)
+    if decoded_characters > max_decoded_characters:
+        raise ParserLimitExceeded("normalized characters exceed the configured limit")
+    buffer += decoded
     if buffer:
-        decoded_characters += len(buffer)
-        if decoded_characters > max_decoded_characters or len(buffer) > max_decoded_characters:
-            raise ParserLimitExceeded("normalized characters exceed the configured limit")
         yield buffer.rstrip("\r"), line_number
 
 

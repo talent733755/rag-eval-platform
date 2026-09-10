@@ -16,6 +16,8 @@ INGESTION_ERROR_CODES: Final[frozenset[str]] = frozenset(
     {
         "unsupported_type",
         "size_exceeded",
+        "parse_timeout",
+        "parser_sandbox_unavailable",
         "checksum_mismatch",
         "parse_failed",
         "provider_not_configured",

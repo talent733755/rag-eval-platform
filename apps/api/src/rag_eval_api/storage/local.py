@@ -51,9 +51,13 @@ class LocalBlobStore:
             raise ValueError("max_bytes must be positive")
         if stale_upload_ttl_seconds < 1:
             raise ValueError("stale_upload_ttl_seconds must be positive")
-        self.root = Path(root)
-        if not self.root.is_absolute() or self.root == Path("/"):
+        raw_root = os.fspath(root)
+        if not os.path.isabs(raw_root):
             raise BlobSecurityError("blob root must be an absolute private directory")
+        normalized_root = os.path.normpath(os.sep + raw_root.lstrip(os.sep))
+        if normalized_root == os.sep:
+            raise BlobSecurityError("blob root must not be the system root")
+        self.root = Path(normalized_root)
         self.root_fd = self._open_directory_chain(self.root, create=True)
         os.fchmod(self.root_fd, 0o700)
         self.max_bytes = max_bytes

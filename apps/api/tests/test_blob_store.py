@@ -12,6 +12,7 @@ from rag_eval_api.storage.errors import (
     BlobChecksumMismatch,
     BlobKeyError,
     BlobNotFound,
+    BlobSecurityError,
     BlobSizeExceeded,
 )
 from rag_eval_api.storage.local import LocalBlobStore
@@ -107,6 +108,12 @@ def test_local_blob_store_rejects_symlinked_root_and_existing_parent(tmp_path: P
     (tmp_path / "parent-link").symlink_to(parent, target_is_directory=True)
     with pytest.raises(Exception, match="symlink"):
         LocalBlobStore(tmp_path / "parent-link" / "blobs")
+
+
+@pytest.mark.parametrize("root", ["/", "//", "////", "/./", "/tmp/.."])
+def test_local_blob_store_rejects_all_system_root_aliases(root: str) -> None:
+    with pytest.raises(BlobSecurityError, match="root"):
+        LocalBlobStore(root)
 
 
 def test_local_blob_store_rejects_parent_replacement_without_following_symlink(

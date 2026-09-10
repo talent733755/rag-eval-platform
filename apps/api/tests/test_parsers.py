@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import time
 import zipfile
 from pathlib import Path
 
@@ -15,7 +17,7 @@ from rag_eval_api.parsers.errors import (
 )
 from rag_eval_api.parsers.models import ParserLimits
 from rag_eval_api.parsers.registry import ParserRegistry
-from rag_eval_api.parsers.runner import ParserTimeout
+from rag_eval_api.parsers.runner import ParserRunner, ParserSandboxUnavailable, ParserTimeout
 
 
 def _docx_bytes() -> bytes:
@@ -164,6 +166,28 @@ def test_registry_accepts_empty_text_but_rejects_empty_or_truncated_pdf() -> Non
         ParserRegistry().parse(
             io.BytesIO(b""), filename="empty.pdf", declared_mime="application/pdf"
         )
+
+
+@pytest.mark.parametrize("length", [150_000, 200_000])
+def test_text_parser_accepts_long_single_lines_up_to_character_limit(length: int) -> None:
+    result = ParserRegistry(isolated=False).parse(
+        io.BytesIO(b"x" * length),
+        filename="long.txt",
+        declared_mime="text/plain",
+        limits=ParserLimits(max_normalized_characters=200_000),
+    )
+
+    assert sum(chunk.character_count for chunk in result.chunks) == length
+
+
+def test_text_parser_rejects_single_line_over_character_limit() -> None:
+    with pytest.raises(ParserLimitExceeded, match="characters"):
+        ParserRegistry(isolated=False).parse(
+            io.BytesIO(b"x" * 200_001),
+            filename="long.txt",
+            declared_mime="text/plain",
+            limits=ParserLimits(max_normalized_characters=200_000),
+        )
     with pytest.raises(MalformedDocumentError):
         ParserRegistry().parse(
             io.BytesIO(b"%PDF-1.7"), filename="truncated.pdf", declared_mime="application/pdf"
@@ -182,6 +206,40 @@ def test_docx_compression_ratio_is_bounded_before_document_parsing() -> None:
             filename="bomb.docx",
             declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             limits=ParserLimits(max_docx_compression_ratio=2),
+        )
+
+
+def test_docx_xml_depth_is_bounded_before_document_parsing() -> None:
+    deep_xml = ("<a>" * 5) + ("</a>" * 5)
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr("word/document.xml", deep_xml)
+
+    with pytest.raises(ParserLimitExceeded, match="XML depth"):
+        ParserRegistry().parse(
+            io.BytesIO(payload.getvalue()),
+            filename="deep.docx",
+            declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            limits=ParserLimits(max_docx_xml_depth=3),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("max_pdf_objects", "object"),
+        ("max_pdf_decoded_stream_bytes", "decoded"),
+        ("max_pdf_recursion_depth", "recursion"),
+    ],
+)
+def test_pdf_resource_limits_are_enforced_in_isolated_runner(field: str, message: str) -> None:
+    with pytest.raises(ParserLimitExceeded, match=message):
+        ParserRegistry().parse(
+            io.BytesIO(_pdf_bytes()),
+            filename="bounded.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(**{field: 1}),
         )
 
 
@@ -215,4 +273,71 @@ def test_parser_runner_enforces_hard_timeout_before_starting_work() -> None:
             filename="guide.pdf",
             declared_mime="application/pdf",
             timeout_seconds=0,
+        )
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content)
+    path.chmod(0o700)
+
+
+def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "sleep.pid"
+    wrapper = tmp_path / "slow-sandbox"
+    _write_executable(
+        wrapper,
+        "#!/bin/sh\n"
+        f"echo $$ > '{pid_file}'\n"
+        "sleep 30\n",
+    )
+    runner = ParserRunner(sandbox_executable=str(wrapper))
+
+    with pytest.raises(ParserTimeout):
+        runner.parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="timeout.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
+            timeout_seconds=2.0,
+        )
+
+    child_pid = int(pid_file.read_text())
+    for _ in range(20):
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("timed-out parser descendant was left running")
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_parser_runner_maps_eof_or_crashed_child_to_sandbox_error(
+    tmp_path: Path, exit_code: int
+) -> None:
+    wrapper = tmp_path / "crashing-sandbox"
+    _write_executable(wrapper, f"#!/bin/sh\nexit {exit_code}\n")
+
+    with pytest.raises(ParserSandboxUnavailable):
+        ParserRunner(sandbox_executable=str(wrapper)).parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="crashed.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
+        )
+
+
+def test_parser_runner_requires_os_sandbox_for_strict_mode() -> None:
+    with pytest.raises(ParserSandboxUnavailable):
+        ParserRunner(require_resource_limits=True).parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="strict.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
         )

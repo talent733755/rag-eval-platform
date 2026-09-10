@@ -48,22 +48,25 @@ ordinal, and a JSON-safe source location (`page`, `paragraph`, `line`, and
 optional `part`). The normalized output is deterministic and contains no input
 path or original filename.
 
-PDF limits are page count, normalized characters, and wall clock. DOCX limits
-are ZIP entries, aggregate uncompressed bytes, compression ratio, XML nesting,
-and normalized paragraphs/characters. ZIP absolute paths, `..` components, and
+PDF limits are page count, object count, decoded stream bytes, recursion depth
+and object count, normalized characters, and wall clock. DOCX limits are ZIP
+entries, aggregate uncompressed bytes, compression ratio, XML nesting, and
+normalized paragraphs/characters. ZIP absolute paths, `..` components, and
 symlink entries are rejected before XML parsing. Malformed/unsupported input
 is classified using the stable error taxonomy in the v1 contract. The parser
 modules do not perform network I/O; production deployments must add a
 non-privileged OS/container sandbox for hostile files.
 
 `ParserRunner` is the security boundary that the next worker phase must use for
-PDF/DOCX jobs. It starts a disposable `spawn` child, disables socket creation,
-applies a hard wall-clock timeout and POSIX CPU limit, and terminates/kills the
-child on timeout. Linux non-root deployments can additionally require address
-space limits; platforms that cannot provide the required CPU/memory profile are
-rejected by production `Settings` when
-`PARSER_REQUIRE_RESOURCE_LIMITS=true` is not satisfied. The current parser
-runner is not a worker process and does not complete upload-to-parse workflow.
+PDF/DOCX jobs. It runs a disposable subprocess and terminates its process group
+on a hard timeout. Development may use a restricted fallback with Python-level
+socket denial, but that is not OS network isolation. Production and
+`PARSER_REQUIRE_RESOURCE_LIMITS=true` require an explicit configured sandbox
+executable/argument profile (such as approved `unshare`/`bwrap`) plus CPU and
+memory limit support; otherwise settings fail closed. Timeout, EOF, and crash
+outcomes retain the public `parse_timeout` and
+`parser_sandbox_unavailable` error codes. The current parser runner is not a
+worker process and does not complete upload-to-parse workflow.
 
 ## Logical flow
 

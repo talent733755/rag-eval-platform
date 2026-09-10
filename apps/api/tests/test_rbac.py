@@ -665,6 +665,9 @@ async def test_production_auth_boundary_returns_501_without_actor_override(
     monkeypatch.setattr(
         "rag_eval_api.parsers.runner.restricted_sandbox_available", lambda: True
     )
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.sandbox_executable_available", lambda _: True
+    )
     settings = Settings(
         database_url="postgresql+asyncpg://rag_eval:real-password@db.example/rag_eval",
         redis_url="redis://redis.example:6379/0",
@@ -673,6 +676,7 @@ async def test_production_auth_boundary_returns_501_without_actor_override(
         log_level="INFO",
         secret_key=SecretStr("a" * 32),
         parser_require_resource_limits=True,
+        parser_sandbox_executable="/test/sandbox",
         _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)

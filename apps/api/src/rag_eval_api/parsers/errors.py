@@ -22,3 +22,12 @@ class ParserLimitExceeded(ParserError):
 
 class ParserSecurityError(ParserError):
     code = "parse_failed"
+
+
+class ParserTimeout(ParserError):
+    code = "parse_timeout"
+    retryable = True
+
+
+class ParserSandboxUnavailable(ParserError):
+    code = "parser_sandbox_unavailable"

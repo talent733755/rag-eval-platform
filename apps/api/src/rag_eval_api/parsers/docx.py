@@ -14,6 +14,7 @@ from rag_eval_api.parsers.errors import (
     MalformedDocumentError,
     ParserLimitExceeded,
     ParserSecurityError,
+    ParserTimeout,
 )
 from rag_eval_api.parsers.models import ParseResult, ParserLimits
 from rag_eval_api.parsers.protocol import normalize_text
@@ -70,7 +71,7 @@ class DocxParser:
                     if info.file_size / compressed > limits.max_docx_compression_ratio:
                         raise ParserLimitExceeded("DOCX compression ratio exceeds the configured limit")
                     if time.monotonic() - started > limits.max_pdf_wall_clock_seconds:
-                        raise ParserLimitExceeded("DOCX parsing exceeded the wall-clock limit")
+                        raise ParserTimeout("DOCX parsing exceeded the wall-clock limit")
                     if name.lower().endswith(".xml"):
                         with archive.open(info, "r") as xml_file:
                             xml_data = xml_file.read(limits.max_docx_uncompressed_bytes + 1)
