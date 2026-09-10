@@ -18,7 +18,7 @@ export type DataCardProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
 const trendStyles: Record<TrendDirection, string> = {
   up: "text-success-foreground",
   down: "text-danger-foreground",
-  neutral: "text-warning-foreground",
+  neutral: "text-muted",
 };
 
 const trendLabels: Record<TrendDirection, string> = {
