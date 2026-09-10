@@ -227,8 +227,18 @@ describe("project switcher", () => {
 
     render(<ProjectSwitcher />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("项目加载失败");
+    expect(await screen.findByRole("alert")).toHaveTextContent("项目响应格式无效");
     expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, { projects: [] }])("treats top-level malformed payload %j as a non-retryable schema error", async (payload) => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+
+    render(<ProjectSwitcher maxAttempts={3} retryDelayMs={0} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("项目响应格式无效");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("times out a hung request within the configured bound", async () => {
@@ -326,6 +336,21 @@ describe("project switcher", () => {
     controller.abort();
 
     expect(removeEventListener).toHaveBeenCalled();
+  });
+
+  it("removes the attempt abort listener after a request settles", async () => {
+    let removeAttemptAbortListener: ReturnType<typeof vi.spyOn> | undefined;
+    vi.mocked(fetch).mockImplementation((_input, init) => {
+      if (init?.signal) {
+        removeAttemptAbortListener = vi.spyOn(init.signal, "removeEventListener");
+      }
+      return Promise.resolve(new Response(JSON.stringify(projects), { status: 200 }));
+    });
+
+    render(<ProjectSwitcher />);
+
+    expect(await screen.findByRole("combobox", { name: "当前项目" })).toBeVisible();
+    expect(removeAttemptAbortListener).toHaveBeenCalled();
   });
 
   it("single-flights the project request under React StrictMode", async () => {

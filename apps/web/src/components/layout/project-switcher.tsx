@@ -63,6 +63,13 @@ class ProjectResponseError extends Error {
   }
 }
 
+class ProjectSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectSchemaError";
+  }
+}
+
 class MalformedProjectResponseError extends Error {
   constructor(index: number) {
     super(`Project response entry ${index} is malformed`);
@@ -251,7 +258,7 @@ function acquireProjectRequest(endpoint: string, options: RequestOptions): {
     );
   }
 
-  if (shared.abortTimer) {
+  if (shared.abortTimer !== undefined) {
     clearTimeout(shared.abortTimer);
     shared.abortTimer = undefined;
   }
@@ -280,6 +287,10 @@ function acquireProjectRequest(endpoint: string, options: RequestOptions): {
 }
 
 function settleSharedRequest(key: string, shared: SharedRequest): void {
+  if (shared.abortTimer !== undefined) {
+    clearTimeout(shared.abortTimer);
+    shared.abortTimer = undefined;
+  }
   shared.settled = true;
   if (pendingRequests.get(key) === shared) {
     pendingRequests.delete(key);
@@ -334,12 +345,15 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
     }
     return parseProjects(payload);
   });
+  let onAttemptAbort: (() => void) | undefined;
   const abort = new Promise<never>((_resolve, reject) => {
+    onAttemptAbort = () => reject(createAbortError());
+
     if (attemptController.signal.aborted) {
       reject(createAbortError());
       return;
     }
-    attemptController.signal.addEventListener("abort", () => reject(createAbortError()), { once: true });
+    attemptController.signal.addEventListener("abort", onAttemptAbort, { once: true });
   });
 
   try {
@@ -352,6 +366,9 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
   } finally {
     clearTimeout(timeoutId);
     parentSignal.removeEventListener("abort", onParentAbort);
+    if (onAttemptAbort) {
+      attemptController.signal.removeEventListener("abort", onAttemptAbort);
+    }
   }
 }
 
@@ -392,7 +409,7 @@ export function waitBeforeRetry(delayMs: number, signal: AbortSignal): Promise<v
 
 function parseProjects(payload: unknown): Project[] {
   if (!Array.isArray(payload)) {
-    throw new Error("Project response must be an array");
+    throw new ProjectSchemaError("Project response must be an array");
   }
 
   return payload.map((item, index): Project => {
@@ -416,7 +433,12 @@ function isAbortError(error: unknown): boolean {
 }
 
 function isRetryableProjectError(error: unknown): boolean {
-  if (isAbortError(error) || error instanceof MalformedProjectResponseError || error instanceof ProjectResponseError) {
+  if (
+    isAbortError(error) ||
+    error instanceof MalformedProjectResponseError ||
+    error instanceof ProjectResponseError ||
+    error instanceof ProjectSchemaError
+  ) {
     return false;
   }
   if (error instanceof ProjectHttpError) {
@@ -440,6 +462,9 @@ function getProjectErrorMessage(error: unknown): string {
   }
   if (error instanceof ProjectTimeoutError) {
     return "项目加载超时，请检查 API 服务后重试。";
+  }
+  if (error instanceof ProjectSchemaError || error instanceof MalformedProjectResponseError) {
+    return "项目响应格式无效，请检查 API 返回的数据结构。";
   }
   return "项目加载失败，请检查 API 服务后重试。";
 }
