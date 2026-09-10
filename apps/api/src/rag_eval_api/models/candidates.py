@@ -121,6 +121,13 @@ class CandidateGenerationConfig(UUIDPrimaryKeyMixin, Base):
             "project_id",
             name="uq_candidate_generation_configs_tenant_identity",
         ),
+        UniqueConstraint(
+            "id",
+            "dataset_id",
+            "organization_id",
+            "project_id",
+            name="uq_candidate_generation_configs_dataset_tenant_identity",
+        ),
         CheckConstraint("length(trim(capability_version)) > 0", name="capability_version_nonempty"),
         CheckConstraint("randomness >= 0", name="randomness_nonnegative"),
         CheckConstraint("estimated_cost >= 0", name="estimated_cost_nonnegative"),
@@ -206,13 +213,14 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["generation_config_id", "organization_id", "project_id"],
+            ["generation_config_id", "dataset_id", "organization_id", "project_id"],
             [
                 "candidate_generation_configs.id",
+                "candidate_generation_configs.dataset_id",
                 "candidate_generation_configs.organization_id",
                 "candidate_generation_configs.project_id",
             ],
-            name="fk_candidate_dataset_items_generation_config_tenant",
+            name="fk_candidate_dataset_items_generation_config_dataset_tenant",
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(

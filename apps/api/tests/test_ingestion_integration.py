@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,8 +24,10 @@ def integration_database_url() -> str:
 async def postgres_connection(integration_database_url: str):
     engine = create_async_engine(integration_database_url, pool_pre_ping=True)
     try:
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
             yield connection
+            await transaction.rollback()
     finally:
         await engine.dispose()
 
@@ -115,7 +117,7 @@ async def test_postgres_migration_head_and_ingestion_tables(
     postgres_connection: AsyncConnection,
 ) -> None:
     revision = await postgres_connection.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "0002_document_ingestion"
+    assert revision == "0003_ingestion_hardening"
     result = await postgres_connection.execute(
         text(
             "SELECT count(*) FROM information_schema.tables "
@@ -132,67 +134,57 @@ async def test_postgres_migration_head_and_ingestion_tables(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_postgres_content_identity_tenant_fk_and_immutable_version(
-    integration_database_url: str,
+    postgres_connection: AsyncConnection,
 ) -> None:
-    engine = create_async_engine(integration_database_url, pool_pre_ping=True)
     sha256 = "a" * 64
+    organization_id, project_id = await _seed_tenant(postgres_connection)
+    document_id, version_id, _ = await _insert_document_version(
+        postgres_connection, organization_id, project_id, sha256=sha256
+    )
+    await postgres_connection.execute(
+        text("UPDATE document_versions SET parse_status = 'processing' WHERE id = :id"),
+        {"id": version_id},
+    )
+    await _assert_db_failure(
+        postgres_connection,
+        text("UPDATE document_versions SET sha256 = :sha256 WHERE id = :id"),
+        {"id": version_id, "sha256": "b" * 64},
+    )
+    savepoint = await postgres_connection.begin_nested()
     try:
-        async with engine.begin() as connection:
-            organization_id, project_id = await _seed_tenant(connection)
-            document_id, version_id, _ = await _insert_document_version(
-                connection, organization_id, project_id, sha256=sha256
-            )
-            await connection.execute(
-                text("UPDATE document_versions SET parse_status = 'processing' WHERE id = :id"),
-                {"id": version_id},
-            )
-            await _assert_db_failure(
-                connection,
-                text("UPDATE document_versions SET sha256 = :sha256 WHERE id = :id"),
-                {"id": version_id, "sha256": "b" * 64},
-            )
-        async with engine.begin() as connection:
-            organization_id, project_id = await _seed_tenant(connection)
-            await _insert_document_version(connection, organization_id, project_id, sha256=sha256)
-            savepoint = await connection.begin_nested()
-            try:
-                with pytest.raises(IntegrityError):
-                    await _insert_document_version(
-                        connection, organization_id, project_id, sha256=sha256
-                    )
-            finally:
-                if savepoint.is_active:
-                    await savepoint.rollback()
-        async with engine.begin() as connection:
-            organization_id, project_id = await _seed_tenant(connection)
-            _, version_id, _ = await _insert_document_version(
-                connection, organization_id, project_id, sha256="c" * 64
-            )
-            await _assert_db_failure(
-                connection,
-                text("DELETE FROM document_versions WHERE id = :id"),
-                {"id": version_id},
-            )
-            await _assert_db_failure(
-                connection,
-                text(
-                    "INSERT INTO document_versions "
-                    "(id, organization_id, project_id, document_id, version_number, sha256, "
-                    "byte_size, detected_mime, storage_key, parse_status) VALUES "
-                    "(:id, :organization_id, :project_id, :document_id, 1, :sha256, 1, "
-                    "'text/plain', 'private/invalid', 'queued')"
-                ),
-                {
-                    "id": uuid4(),
-                    "organization_id": organization_id,
-                    "project_id": project_id,
-                    "document_id": document_id,
-                    "sha256": "not-a-sha",
-                },
-                IntegrityError,
+        with pytest.raises(IntegrityError):
+            await _insert_document_version(
+                postgres_connection, organization_id, project_id, sha256=sha256
             )
     finally:
-        await engine.dispose()
+        if savepoint.is_active:
+            await savepoint.rollback()
+    _, second_version_id, _ = await _insert_document_version(
+        postgres_connection, organization_id, project_id, sha256="c" * 64
+    )
+    await _assert_db_failure(
+        postgres_connection,
+        text("DELETE FROM document_versions WHERE id = :id"),
+        {"id": second_version_id},
+    )
+    await _assert_db_failure(
+        postgres_connection,
+        text(
+            "INSERT INTO document_versions "
+            "(id, organization_id, project_id, document_id, version_number, sha256, "
+            "byte_size, detected_mime, storage_key, parse_status) VALUES "
+            "(:id, :organization_id, :project_id, :document_id, 1, :sha256, 1, "
+            "'text/plain', 'private/invalid', 'queued')"
+        ),
+        {
+            "id": uuid4(),
+            "organization_id": organization_id,
+            "project_id": project_id,
+            "document_id": document_id,
+            "sha256": "not-a-sha",
+        },
+        IntegrityError,
+    )
 
 
 @pytest.mark.integration
@@ -302,6 +294,45 @@ async def test_postgres_candidate_traceability_and_config_immutability(
         text("UPDATE candidate_generation_configs SET model_name = 'mutated' WHERE id = :id"),
         {"id": config_id},
     )
+    await _assert_db_failure(
+        postgres_connection,
+        text("DELETE FROM candidate_generation_configs WHERE id = :id"),
+        {"id": config_id},
+    )
+    await _assert_db_failure(
+        postgres_connection,
+        text("TRUNCATE candidate_generation_configs"),
+        {},
+    )
+
+    second_dataset_id = uuid4()
+    await postgres_connection.execute(
+        text(
+            "INSERT INTO candidate_datasets "
+            "(id, organization_id, project_id, name, status) VALUES "
+            "(:id, :organization_id, :project_id, 'Dataset B', 'draft')"
+        ),
+        {"id": second_dataset_id, "organization_id": organization_id, "project_id": project_id},
+    )
+    await _assert_db_failure(
+        postgres_connection,
+        text(
+            "INSERT INTO candidate_dataset_items "
+            "(id, organization_id, project_id, dataset_id, generation_config_id, source_version_id, "
+            "question, question_type, reference_answer, confidence, automatic_checks, review_status, provenance) "
+            "VALUES (:id, :organization_id, :project_id, :dataset_id, :config_id, :version_id, "
+            "'Wrong dataset', 'single_answer', 'Answer', 0.5, '{}', 'pending', '{}')"
+        ),
+        {
+            "id": uuid4(),
+            "organization_id": organization_id,
+            "project_id": project_id,
+            "dataset_id": second_dataset_id,
+            "config_id": config_id,
+            "version_id": version_id,
+        },
+        IntegrityError,
+    )
 
 
 @pytest.mark.integration
@@ -390,3 +421,53 @@ async def test_postgres_job_status_final_history_and_lease_fencing(
         {"id": lease_id, "heartbeat": now},
     )
     assert stale.rowcount == 0
+
+    active_until = now + timedelta(seconds=30)
+    await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_job_leases SET lease_expires_at = :expires, heartbeat_at = :heartbeat "
+            "WHERE id = :id AND fencing_token = 1"
+        ),
+        {"id": lease_id, "expires": active_until, "heartbeat": now},
+    )
+    successful_write = await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_jobs SET status = 'processing' WHERE id = :job_id AND EXISTS ("
+            "SELECT 1 FROM ingestion_job_leases WHERE id = :lease_id AND fencing_token = 1 "
+            "AND lease_expires_at >= :now)"
+        ),
+        {"job_id": job_id, "lease_id": lease_id, "now": now},
+    )
+    assert successful_write.rowcount == 1
+    await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_job_leases SET lease_expires_at = :expired "
+            "WHERE id = :id AND fencing_token = 1"
+        ),
+        {"id": lease_id, "expired": now},
+    )
+    reclaimed = await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_job_leases SET worker_id = 'worker-2', attempt_number = 2, "
+            "fencing_token = 2, lease_expires_at = :expires, heartbeat_at = :heartbeat "
+            "WHERE id = :id AND fencing_token = 1 AND lease_expires_at <= :now"
+        ),
+        {"id": lease_id, "expires": now, "heartbeat": now, "now": now},
+    )
+    assert reclaimed.rowcount == 1
+    old_token_write = await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_jobs SET status = 'succeeded' WHERE id = :job_id AND EXISTS ("
+            "SELECT 1 FROM ingestion_job_leases WHERE id = :lease_id AND fencing_token = 1)"
+        ),
+        {"job_id": job_id, "lease_id": lease_id},
+    )
+    assert old_token_write.rowcount == 0
+    new_token_write = await postgres_connection.execute(
+        text(
+            "UPDATE ingestion_jobs SET status = 'succeeded' WHERE id = :job_id AND EXISTS ("
+            "SELECT 1 FROM ingestion_job_leases WHERE id = :lease_id AND fencing_token = 2)"
+        ),
+        {"job_id": job_id, "lease_id": lease_id},
+    )
+    assert new_token_write.rowcount == 1

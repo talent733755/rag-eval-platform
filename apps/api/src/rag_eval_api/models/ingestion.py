@@ -218,7 +218,7 @@ class IngestionJobAttempt(UUIDPrimaryKeyMixin, Base):
             name="ingestion_attempt_final_status",
             native_enum=False,
             create_constraint=True,
-            length=9,
+            length=10,
         ),
         nullable=False,
     )

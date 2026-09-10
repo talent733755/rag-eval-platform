@@ -12,4 +12,3 @@ class DocumentContentIdentity(BaseModel):
 
     sha256: Sha256Hex
     byte_size: int = Field(gt=0)
-

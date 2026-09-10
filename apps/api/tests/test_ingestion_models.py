@@ -10,6 +10,7 @@ from rag_eval_api.models import (
     DocumentParseStatus,
     DocumentSourceType,
     DocumentVersion,
+    IngestionAttemptFinalStatus,
     IngestionJob,
     IngestionJobAttempt,
     IngestionJobKind,
@@ -66,6 +67,8 @@ def test_ingestion_model_constraints_cover_idempotency_and_immutable_history() -
     assert CandidateItemEvidence.__table__.c.source_version_id is not None
     assert isinstance(DocumentVersion.__table__.c.byte_size.type, BigInteger)
     assert isinstance(IngestionJobLease.__table__.c.fencing_token.type, BigInteger)
+    assert IngestionJob.__table__.c.status.type.length == 10
+    assert IngestionJobAttempt.__table__.c.final_status.type.length == 10
     assert any(
         isinstance(constraint, CheckConstraint) and "sha256" in str(constraint.sqltext)
         for constraint in DocumentVersion.__table__.constraints
@@ -99,5 +102,12 @@ def test_public_ingestion_enums_have_stable_wire_values() -> None:
         "succeeded",
         "partial",
         "failed",
+        "cancelled",
+    }
+    assert {member.value for member in IngestionAttemptFinalStatus} == {
+        "succeeded",
+        "partial",
+        "failed",
+        "blocked",
         "cancelled",
     }
