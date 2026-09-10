@@ -1,0 +1,31 @@
+import pytest
+from pydantic import SecretStr
+
+from rag_eval_api.config import Settings
+
+
+def test_document_ingestion_defaults_are_safe_and_provider_is_opt_in() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.blob_root == "/var/lib/rag-eval/blobs"
+    assert settings.max_upload_bytes == 50 * 1024 * 1024
+    assert settings.provider_base_url is None
+    assert settings.provider_api_key is None
+    assert settings.worker_lease_ttl_seconds == 60
+
+
+def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist() -> None:
+    with pytest.raises(ValueError, match="BLOB_ROOT"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key=SecretStr("x" * 40),
+            database_url="postgresql+asyncpg://app:secret@db:5432/rag_eval",
+            redis_url="redis://redis:6379/0",
+            blob_root="/tmp/rag-eval-blobs",
+        )
+
+
+def test_provider_credentials_are_not_part_of_safe_configuration_dump() -> None:
+    settings = Settings(_env_file=None, provider_api_key=SecretStr("super-secret"))
+    rendered = repr(settings) + str(settings.model_dump())
+    assert "super-secret" not in rendered

@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test build infra-up infra-down
+.PHONY: install lint typecheck test test-integration build infra-up infra-down
 
 install:
 	corepack pnpm install --frozen-lockfile
@@ -11,7 +11,10 @@ typecheck:
 	corepack pnpm typecheck && uv run --directory apps/api mypy src
 
 test:
-	corepack pnpm test && uv run --directory apps/api pytest -q
+	corepack pnpm test && uv run --directory apps/api pytest -m "not integration" -q
+
+test-integration:
+	uv run --directory apps/api pytest -m integration -q
 
 build:
 	corepack pnpm build
