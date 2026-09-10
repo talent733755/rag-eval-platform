@@ -14,6 +14,7 @@ test:
 	corepack pnpm test && uv run --directory apps/api pytest -m "not integration" -q
 
 test-integration:
+	@test -n "$${TEST_DATABASE_URL:-}" || (echo "TEST_DATABASE_URL is required for integration tests" >&2; exit 2)
 	uv run --directory apps/api pytest -m integration -q
 
 build:

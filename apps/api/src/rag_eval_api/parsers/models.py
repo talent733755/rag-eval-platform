@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,26 +20,49 @@ class ParserLimits:
     max_normalized_characters: int = 200_000
     max_chunk_characters: int = 2_000
     max_pdf_wall_clock_seconds: float = 10.0
+    max_pdf_objects: int = 100_000
+    max_pdf_decoded_stream_bytes: int = 100 * 1024 * 1024
+    max_pdf_recursion_depth: int = 100
+    max_pdf_recursion_objects: int = 100_000
     max_docx_zip_entries: int = 10_000
     max_docx_uncompressed_bytes: int = 100 * 1024 * 1024
     max_docx_compression_ratio: float = 100.0
     max_docx_xml_depth: int = 100
 
+    _SAFE_UPPER_BOUNDS: ClassVar[dict[str, int | float]] = {
+        "max_input_bytes": 1024 * 1024 * 1024,
+        "max_pages": 100_000,
+        "max_paragraphs": 1_000_000,
+        "max_normalized_characters": 10_000_000,
+        "max_chunk_characters": 100_000,
+        "max_pdf_wall_clock_seconds": 300.0,
+        "max_pdf_objects": 1_000_000,
+        "max_pdf_decoded_stream_bytes": 1024 * 1024 * 1024,
+        "max_pdf_recursion_depth": 1_000,
+        "max_pdf_recursion_objects": 1_000_000,
+        "max_docx_zip_entries": 100_000,
+        "max_docx_uncompressed_bytes": 1_000_000_000,
+        "max_docx_compression_ratio": 1_000.0,
+        "max_docx_xml_depth": 10_000,
+    }
+
+    @classmethod
+    def safe_upper_bounds(cls) -> dict[str, int | float]:
+        return dict(cls._SAFE_UPPER_BOUNDS)
+
     def __post_init__(self) -> None:
-        for name in (
-            "max_input_bytes",
-            "max_pages",
-            "max_paragraphs",
-            "max_normalized_characters",
-            "max_chunk_characters",
-            "max_docx_zip_entries",
-            "max_docx_uncompressed_bytes",
-            "max_docx_xml_depth",
-        ):
-            if getattr(self, name) < 1:
+        for name, upper_bound in self._SAFE_UPPER_BOUNDS.items():
+            value = getattr(self, name)
+            if isinstance(upper_bound, int) and (not isinstance(value, int) or isinstance(value, bool)):
+                raise ValueError(f"{name} must be an integer")
+            if isinstance(upper_bound, float) and not isinstance(value, int | float):
+                raise ValueError(f"{name} must be numeric")
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if value < 1:
                 raise ValueError(f"{name} must be positive")
-        if self.max_pdf_wall_clock_seconds <= 0 or self.max_docx_compression_ratio < 1:
-            raise ValueError("parser floating point limits are invalid")
+            if value > upper_bound:
+                raise ValueError(f"{name} exceeds the safe upper bound")
 
 
 @dataclass(frozen=True, slots=True)

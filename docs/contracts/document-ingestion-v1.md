@@ -95,6 +95,14 @@ Deployments processing untrusted files must additionally run the API/parser in
 a non-privileged, resource-limited container or equivalent sandbox; the
 in-process parser is not a substitute for OS-level isolation.
 
+The public registry uses `ParserRunner` for PDF and DOCX by default. The runner
+uses a disposable non-root process, disables network socket creation, applies a
+hard timeout and CPU limit, and terminates/kills work that exceeds the bound.
+Linux production deployments may require the address-space limit profile. If a
+platform cannot provide the configured CPU/memory profile, production settings
+fail closed. This runner is the parser boundary for the next worker phase; it
+does not itself implement a worker, upload route, or upload-to-parse workflow.
+
 ## Tenant and resource identity
 
 Every resource has `organization_id` and `project_id`. Database relationships

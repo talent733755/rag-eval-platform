@@ -15,6 +15,7 @@ from rag_eval_api.parsers.errors import (
 from rag_eval_api.parsers.models import ParseResult, ParserLimits
 from rag_eval_api.parsers.pdf import PdfParser
 from rag_eval_api.parsers.protocol import DocumentParser, read_bounded, source_name
+from rag_eval_api.parsers.runner import ParserRunner
 from rag_eval_api.parsers.text import MarkdownParser, TextParser
 
 _MIME_BY_EXTENSION = {
@@ -29,7 +30,7 @@ _MIME_BY_EXTENSION = {
 class ParserRegistry:
     """Dispatch only to built-in parsers after extension, MIME and signature checks."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, isolated: bool = True, runner: ParserRunner | None = None) -> None:
         self._parsers: dict[str, DocumentParser] = {
             ".pdf": PdfParser(),
             ".docx": DocxParser(),
@@ -37,6 +38,7 @@ class ParserRegistry:
             ".markdown": MarkdownParser(),
             ".txt": TextParser(),
         }
+        self._runner = runner if runner is not None else (ParserRunner() if isolated else None)
 
     def parse(
         self,
@@ -45,6 +47,7 @@ class ParserRegistry:
         filename: str,
         declared_mime: str | None = None,
         limits: ParserLimits | None = None,
+        timeout_seconds: float | None = None,
     ) -> ParseResult:
         effective_limits = limits or ParserLimits()
         safe_filename = source_name(filename)
@@ -64,6 +67,15 @@ class ParserRegistry:
         data = read_bounded(source, max_bytes=effective_limits.max_input_bytes)
         self._validate_signature(suffix, data)
         try:
+            if self._runner is not None and suffix in {".pdf", ".docx"}:
+                return self._runner.parse_bytes(
+                    data,
+                    suffix=suffix,
+                    filename=safe_filename,
+                    declared_mime=normalized_mime or None,
+                    limits=effective_limits,
+                    timeout_seconds=timeout_seconds,
+                )
             return parser.parse(
                 data,
                 filename=safe_filename,

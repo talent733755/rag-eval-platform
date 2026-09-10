@@ -56,6 +56,15 @@ is classified using the stable error taxonomy in the v1 contract. The parser
 modules do not perform network I/O; production deployments must add a
 non-privileged OS/container sandbox for hostile files.
 
+`ParserRunner` is the security boundary that the next worker phase must use for
+PDF/DOCX jobs. It starts a disposable `spawn` child, disables socket creation,
+applies a hard wall-clock timeout and POSIX CPU limit, and terminates/kills the
+child on timeout. Linux non-root deployments can additionally require address
+space limits; platforms that cannot provide the required CPU/memory profile are
+rejected by production `Settings` when
+`PARSER_REQUIRE_RESOURCE_LIMITS=true` is not satisfied. The current parser
+runner is not a worker process and does not complete upload-to-parse workflow.
+
 ## Logical flow
 
 ```text

@@ -6,9 +6,9 @@ import re
 
 from markdown_it import MarkdownIt
 
-from rag_eval_api.parsers.errors import MalformedDocumentError, ParserLimitExceeded
+from rag_eval_api.parsers.errors import ParserLimitExceeded
 from rag_eval_api.parsers.models import CanonicalChunk, ParseResult, ParserLimits
-from rag_eval_api.parsers.protocol import content_hash, normalize_text
+from rag_eval_api.parsers.protocol import content_hash, iter_utf8_lines, normalize_text
 
 
 def _finish_chunks(
@@ -59,16 +59,22 @@ class TextParser:
 
     def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
         del filename, declared_mime
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise MalformedDocumentError("text is not valid UTF-8") from exc
-        normalized = normalize_text(text)
-        blocks: list[tuple[str, dict[str, int], str | None]] = [
-            (normalize_text(block), {"paragraph": index}, None)
-            for index, block in enumerate(re.split(r"\n\s*\n", normalized))
-            if normalize_text(block)
-        ]
+        blocks: list[tuple[str, dict[str, int], str | None]] = []
+        paragraph_lines: list[str] = []
+        paragraph_index = 0
+        for line, _line_number in iter_utf8_lines(
+            data, max_decoded_characters=limits.max_normalized_characters
+        ):
+            normalized_line = normalize_text(line)
+            if normalized_line:
+                paragraph_lines.append(normalized_line)
+                continue
+            if paragraph_lines:
+                blocks.append(("\n".join(paragraph_lines), {"paragraph": paragraph_index}, None))
+                paragraph_lines = []
+                paragraph_index += 1
+        if paragraph_lines:
+            blocks.append(("\n".join(paragraph_lines), {"paragraph": paragraph_index}, None))
         return _finish_chunks(
             blocks, data=data, parser_version=self.parser_version, limits=limits
         )
@@ -79,14 +85,6 @@ class MarkdownParser:
 
     def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
         del filename, declared_mime
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise MalformedDocumentError("Markdown is not valid UTF-8") from exc
-        normalized = normalize_text(text)
-        # Parse with the pinned CommonMark implementation before canonicalizing
-        # blocks. It does not render HTML or fetch remote resources.
-        MarkdownIt("commonmark").parse(normalized)
         blocks: list[tuple[str, dict[str, int], str | None]] = []
         heading: str | None = None
         paragraph_lines: list[str] = []
@@ -97,10 +95,14 @@ class MarkdownParser:
             if paragraph_lines:
                 value = normalize_text("\n".join(paragraph_lines))
                 if value:
+                    MarkdownIt("commonmark").parse(value)
                     blocks.append((value, {"line": paragraph_start}, heading))
                 paragraph_lines = []
 
-        for line_number, line in enumerate(normalized.splitlines(), start=1):
+        for line, line_number in iter_utf8_lines(
+            data, max_decoded_characters=limits.max_normalized_characters
+        ):
+            line = normalize_text(line)
             match = re.match(r"^#{1,6}\s+(.+?)\s*#*$", line)
             if match:
                 flush()

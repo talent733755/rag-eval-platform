@@ -15,6 +15,7 @@ from rag_eval_api.parsers.errors import (
 )
 from rag_eval_api.parsers.models import ParserLimits
 from rag_eval_api.parsers.registry import ParserRegistry
+from rag_eval_api.parsers.runner import ParserTimeout
 
 
 def _docx_bytes() -> bytes:
@@ -181,4 +182,37 @@ def test_docx_compression_ratio_is_bounded_before_document_parsing() -> None:
             filename="bomb.docx",
             declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             limits=ParserLimits(max_docx_compression_ratio=2),
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "max_input_bytes",
+        "max_pages",
+        "max_paragraphs",
+        "max_normalized_characters",
+        "max_chunk_characters",
+        "max_pdf_objects",
+        "max_pdf_decoded_stream_bytes",
+        "max_pdf_recursion_depth",
+        "max_docx_zip_entries",
+        "max_docx_uncompressed_bytes",
+        "max_docx_compression_ratio",
+        "max_docx_xml_depth",
+    ],
+)
+def test_parser_limits_reject_values_above_safe_upper_bounds(field: str) -> None:
+    upper_bound = ParserLimits.safe_upper_bounds()[field]
+    with pytest.raises(ValueError, match="safe upper bound"):
+        ParserLimits(**{field: upper_bound + 1})
+
+
+def test_parser_runner_enforces_hard_timeout_before_starting_work() -> None:
+    with pytest.raises(ParserTimeout):
+        ParserRegistry().parse(
+            io.BytesIO(_pdf_bytes()),
+            filename="guide.pdf",
+            declared_mime="application/pdf",
+            timeout_seconds=0,
         )

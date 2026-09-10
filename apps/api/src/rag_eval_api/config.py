@@ -112,6 +112,46 @@ class Settings(BaseSettings):
             validation_alias=AliasChoices("MAX_CHUNK_CHARACTERS", "max_chunk_characters"),
         ),
     ] = 2_000
+    max_pdf_objects: Annotated[
+        int,
+        Field(ge=1, le=1_000_000, validation_alias=AliasChoices("MAX_PDF_OBJECTS", "max_pdf_objects")),
+    ] = 100_000
+    max_pdf_decoded_stream_bytes: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=1_000 * 1024 * 1024,
+            validation_alias=AliasChoices(
+                "MAX_PDF_DECODED_STREAM_BYTES", "max_pdf_decoded_stream_bytes"
+            ),
+        ),
+    ] = 100 * 1024 * 1024
+    max_pdf_recursion_depth: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=1_000,
+            validation_alias=AliasChoices("MAX_PDF_RECURSION_DEPTH", "max_pdf_recursion_depth"),
+        ),
+    ] = 100
+    max_pdf_recursion_objects: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=1_000_000,
+            validation_alias=AliasChoices(
+                "MAX_PDF_RECURSION_OBJECTS", "max_pdf_recursion_objects"
+            ),
+        ),
+    ] = 100_000
+    parser_require_resource_limits: Annotated[
+        bool,
+        Field(
+            validation_alias=AliasChoices(
+                "PARSER_REQUIRE_RESOURCE_LIMITS", "parser_require_resource_limits"
+            )
+        ),
+    ] = False
     max_parser_wall_clock_seconds: Annotated[
         int,
         Field(
@@ -353,6 +393,12 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "local database and Redis defaults are only allowed in development"
                 )
+            from rag_eval_api.parsers.runner import restricted_sandbox_available
+
+            if not self.parser_require_resource_limits or not restricted_sandbox_available():
+                raise ValueError(
+                    "production requires a non-root parser sandbox with CPU and memory limits"
+                )
         return self
 
     def parser_limits(self) -> ParserLimits:
@@ -365,6 +411,10 @@ class Settings(BaseSettings):
             max_normalized_characters=self.max_normalized_characters,
             max_chunk_characters=self.max_chunk_characters,
             max_pdf_wall_clock_seconds=float(self.max_parser_wall_clock_seconds),
+            max_pdf_objects=self.max_pdf_objects,
+            max_pdf_decoded_stream_bytes=self.max_pdf_decoded_stream_bytes,
+            max_pdf_recursion_depth=self.max_pdf_recursion_depth,
+            max_pdf_recursion_objects=self.max_pdf_recursion_objects,
             max_docx_zip_entries=self.max_docx_zip_entries,
             max_docx_uncompressed_bytes=self.max_docx_uncompressed_bytes,
             max_docx_compression_ratio=self.max_docx_compression_ratio,

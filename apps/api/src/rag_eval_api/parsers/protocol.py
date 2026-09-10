@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import re
 import unicodedata
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -54,6 +56,38 @@ def normalize_text(value: str) -> str:
 
 def content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def iter_utf8_lines(data: bytes, *, max_decoded_characters: int) -> Iterator[tuple[str, int]]:
+    """Decode incrementally and bound both total and pending text buffers."""
+
+    from rag_eval_api.parsers.errors import MalformedDocumentError, ParserLimitExceeded
+
+    decoder = codecs.getincrementaldecoder("utf-8")("strict")
+    buffer = ""
+    decoded_characters = 0
+    line_number = 1
+    for start in range(0, len(data), 64 * 1024):
+        try:
+            buffer += decoder.decode(data[start : start + 64 * 1024], final=False)
+        except UnicodeDecodeError as exc:
+            raise MalformedDocumentError("text is not valid UTF-8") from exc
+        decoded_characters += len(buffer)
+        if decoded_characters > max_decoded_characters or len(buffer) > max_decoded_characters:
+            raise ParserLimitExceeded("normalized characters exceed the configured limit")
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            yield line.rstrip("\r"), line_number
+            line_number += 1
+    try:
+        buffer += decoder.decode(b"", final=True)
+    except UnicodeDecodeError as exc:
+        raise MalformedDocumentError("text is not valid UTF-8") from exc
+    if buffer:
+        decoded_characters += len(buffer)
+        if decoded_characters > max_decoded_characters or len(buffer) > max_decoded_characters:
+            raise ParserLimitExceeded("normalized characters exceed the configured limit")
+        yield buffer.rstrip("\r"), line_number
 
 
 def source_name(filename: str) -> str:

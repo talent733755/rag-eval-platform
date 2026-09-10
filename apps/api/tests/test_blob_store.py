@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -91,3 +93,48 @@ def test_local_blob_store_temp_file_is_removed_when_source_fails(tmp_path: Path)
         store.put(BrokenSource())  # type: ignore[arg-type]
 
     assert not any(path.name.startswith(".upload-") for path in root.rglob("*"))
+
+
+def test_local_blob_store_rejects_symlinked_root_and_existing_parent(tmp_path: Path) -> None:
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    (tmp_path / "root-link").symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(Exception, match="symlink"):
+        LocalBlobStore(tmp_path / "root-link")
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    (tmp_path / "parent-link").symlink_to(parent, target_is_directory=True)
+    with pytest.raises(Exception, match="symlink"):
+        LocalBlobStore(tmp_path / "parent-link" / "blobs")
+
+
+def test_local_blob_store_rejects_parent_replacement_without_following_symlink(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "blobs"
+    store = LocalBlobStore(root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    prefix = "a" * 16
+    store._new_key = lambda: f"{prefix}/{ 'b' * 32 }"  # type: ignore[method-assign]
+    (root / prefix).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(Exception, match="symlink|safe"):
+        store.put(io.BytesIO(b"must not escape"))
+    assert list(outside.iterdir()) == []
+
+
+def test_local_blob_store_reaps_only_stale_private_upload_files(tmp_path: Path) -> None:
+    root = tmp_path / "blobs"
+    store = LocalBlobStore(root, stale_upload_ttl_seconds=60)
+    stale = root / ".upload-stale"
+    fresh = root / ".upload-fresh"
+    stale.write_bytes(b"old")
+    fresh.write_bytes(b"new")
+    old_time = time.time() - 3600
+    os.utime(stale, (old_time, old_time))
+
+    assert store.reap_stale_uploads(ttl_seconds=60) == 1
+    assert not stale.exists()
+    assert fresh.exists()

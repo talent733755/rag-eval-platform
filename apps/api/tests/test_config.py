@@ -32,6 +32,19 @@ def test_provider_credentials_are_not_part_of_safe_configuration_dump() -> None:
     assert "super-secret" not in rendered
 
 
+def test_production_fails_closed_without_restricted_parser_resource_limits() -> None:
+    with pytest.raises(ValueError, match="parser sandbox"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key=SecretStr("x" * 40),
+            database_url="postgresql+asyncpg://app:secret@db:5432/rag_eval",
+            redis_url="redis://redis:6379/0",
+            blob_root="/var/lib/rag-eval/blobs",
+            parser_require_resource_limits=False,
+        )
+
+
 def test_provider_url_requires_allowlisted_hostname_and_port() -> None:
     base = {
         "_env_file": None,

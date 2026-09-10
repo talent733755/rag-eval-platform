@@ -656,9 +656,15 @@ async def test_missing_route_returns_consistent_404_error(
 
 
 @pytest.mark.asyncio
-async def test_production_auth_boundary_returns_501_without_actor_override() -> None:
+async def test_production_auth_boundary_returns_501_without_actor_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from rag_eval_api.main import create_app
 
+    # This test exercises the auth boundary, not the host's sandbox capability.
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.restricted_sandbox_available", lambda: True
+    )
     settings = Settings(
         database_url="postgresql+asyncpg://rag_eval:real-password@db.example/rag_eval",
         redis_url="redis://redis.example:6379/0",
@@ -666,6 +672,7 @@ async def test_production_auth_boundary_returns_501_without_actor_override() -> 
         cors_origins=[],
         log_level="INFO",
         secret_key=SecretStr("a" * 32),
+        parser_require_resource_limits=True,
         _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
