@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ProjectLink } from "./project-link";
 
 type EmptyStateProps = {
   title: string;
@@ -15,9 +15,9 @@ export function EmptyState({ actionHref, actionLabel, description, title }: Empt
         {title}
       </h1>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">{description}</p>
-      <Link className="mt-6 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90" href={actionHref}>
+      <ProjectLink className="mt-6 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90" href={actionHref}>
         {actionLabel}
-      </Link>
+      </ProjectLink>
     </section>
   );
 }

@@ -38,7 +38,6 @@ function SidebarContent({
         </div>
       )}
       <SidebarNav onNavigate={onNavigate} pathname={pathname} role={role} />
-      <ProjectSwitcher />
     </div>
   );
 }
@@ -167,6 +166,7 @@ export function AppShell({
               <span aria-hidden="true" className="text-muted">/</span>
               <span className="truncate text-muted">项目上下文</span>
             </div>
+            <ProjectSwitcher />
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <button

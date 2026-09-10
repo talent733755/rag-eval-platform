@@ -30,7 +30,6 @@ export const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "experiment.read",
     "experiment.edit",
     "diagnostics.read",
-    "service.admin",
   ],
   viewer: ["project.read", "asset.read", "experiment.read", "diagnostics.read"],
 };

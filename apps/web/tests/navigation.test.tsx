@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectSwitcher } from "../src/components/layout/project-switcher";
 import { SidebarNav } from "../src/components/layout/sidebar-nav";
+import { UserMenu } from "../src/components/layout/user-menu";
+import { EmptyState } from "../src/components/ui/empty-state";
+import { hasPermission } from "../src/lib/auth/permissions";
 
 const projects = [
   {
@@ -18,7 +21,10 @@ const projects = [
 ];
 
 describe("permission-aware navigation", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("shows approved menu groups and links in canonical order", () => {
     render(<SidebarNav role="admin" pathname="/" />);
@@ -59,11 +65,52 @@ describe("permission-aware navigation", () => {
     expect(screen.queryByText("系统管理")).not.toBeInTheDocument();
   });
 
+  it("keeps service administration exclusive to administrators", () => {
+    expect(hasPermission("admin", "service.admin")).toBe(true);
+    expect(hasPermission("editor", "service.admin")).toBe(false);
+    expect(hasPermission("viewer", "service.admin")).toBe(false);
+
+    const { unmount } = render(<SidebarNav role="editor" pathname="/settings/services" />);
+    expect(screen.queryByRole("link", { name: "模型与服务" })).not.toBeInTheDocument();
+    unmount();
+
+    render(<SidebarNav role="admin" pathname="/settings/services" />);
+    expect(screen.getByRole("link", { name: "模型与服务" })).toBeVisible();
+  });
+
   it("marks the exact or nested pathname as the active accessible link", () => {
     render(<SidebarNav role="admin" pathname="/settings/members/invite" />);
 
     expect(screen.getByRole("link", { name: "项目与成员" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "工作台" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("preserves project B after switching from project A on sidebar and empty-state links", async () => {
+    window.history.replaceState({}, "", `/?project=${projects[0].id}`);
+    vi.stubGlobal("fetch", vi.fn());
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
+
+    render(
+      <>
+        <ProjectSwitcher />
+        <SidebarNav role="admin" pathname="/" />
+        <EmptyState title="文档库" description="desc" actionLabel="前往评测集" actionHref="/datasets" />
+      </>,
+    );
+
+    const switcher = await screen.findByRole("combobox", { name: "当前项目" });
+    fireEvent.change(switcher, { target: { value: projects[1].id } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "文档库" })).toHaveAttribute(
+        "href",
+        `/documents?project=${projects[1].id}`,
+      );
+      expect(screen.getByRole("link", { name: "前往评测集" })).toHaveAttribute(
+        "href",
+        `/datasets?project=${projects[1].id}`,
+      );
+    });
   });
 });
 
@@ -127,6 +174,17 @@ describe("project switcher", () => {
     expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
   });
 
+  it("shows an error instead of silently dropping malformed API entries", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify([projects[0], { id: projects[1].id }]), { status: 200 }),
+    );
+
+    render(<ProjectSwitcher />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("项目加载失败");
+    expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
+  });
+
   it("does not select the first project when the query project is unavailable", async () => {
     window.history.replaceState({}, "", `/?project=33333333-3333-4333-8333-333333333333`);
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(projects), { status: 200 }));
@@ -136,5 +194,43 @@ describe("project switcher", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("当前项目不可用");
     expect(screen.queryByRole("combobox", { name: "当前项目" })).not.toBeInTheDocument();
     expect(window.location.search).toContain("33333333-3333-4333-8333-333333333333");
+  });
+
+  it("does not update state or URL after unmounting during a successful response", async () => {
+    let resolveResponse: (response: Response) => void = () => undefined;
+    vi.mocked(fetch).mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      }),
+    );
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    const { unmount } = render(<ProjectSwitcher />);
+    unmount();
+    resolveResponse(new Response(JSON.stringify(projects), { status: 200 }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+});
+
+describe("user menu popover", () => {
+  afterEach(() => cleanup());
+
+  it("uses popover semantics and closes on Escape", () => {
+    render(<UserMenu />);
+
+    const trigger = screen.getByRole("button", { name: "打开用户菜单" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "用户菜单" })).toBeVisible();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "用户菜单" })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 });

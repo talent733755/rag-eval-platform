@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
-
 import { hasPermission, type UserRole } from "../../lib/auth/permissions";
 import { isNavigationGroup, isNavigationItemActive, navigation } from "../../lib/navigation";
+import { ProjectLink } from "../ui/project-link";
 
 type SidebarNavProps = {
   role: UserRole;
@@ -63,7 +62,7 @@ function NavigationLink({
   const active = isNavigationItemActive(pathname, item.href);
 
   return (
-    <Link
+    <ProjectLink
       aria-current={active ? "page" : undefined}
       className={[
         "block rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-white",
@@ -75,6 +74,6 @@ function NavigationLink({
       onClick={onNavigate}
     >
       {item.label}
-    </Link>
+    </ProjectLink>
   );
 }

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { getProjectIdFromSearch, updateProjectQuery } from "../../lib/project-context";
+
 type Project = {
   id: string;
   name: string;
@@ -20,8 +22,9 @@ export function ProjectSwitcher() {
   const [state, setState] = useState<ProjectState>({ status: "loading" });
 
   useEffect(() => {
+    let cancelled = false;
     const controller = new AbortController();
-    const queryProjectId = getQueryProjectId();
+    const queryProjectId = getProjectIdFromSearch(window.location.search);
     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL;
     const endpoint = `${baseUrl.replace(/\/$/, "")}/api/projects`;
 
@@ -35,6 +38,10 @@ export function ProjectSwitcher() {
         return parseProjects(payload);
       })
       .then((projects) => {
+        if (cancelled || controller.signal.aborted) {
+          return;
+        }
+
         if (queryProjectId) {
           if (!projects.some((project) => project.id === queryProjectId)) {
             setState({ status: "invalid-selection", requestedId: queryProjectId, projects });
@@ -51,18 +58,21 @@ export function ProjectSwitcher() {
         }
 
         const selectedId = projects[0].id;
-        updateQueryProjectId(selectedId);
+        updateProjectQuery(selectedId);
         setState({ status: "ready", projects, selectedId });
       })
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
+        if (cancelled || controller.signal.aborted || isAbortError(error)) {
           return;
         }
 
         setState({ status: "error", message: "项目加载失败，请检查 API 服务后重试。" });
       });
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, []);
 
   if (state.status === "loading") {
@@ -86,11 +96,11 @@ export function ProjectSwitcher() {
   }
 
   return (
-    <label className="block border-t border-white/10 px-5 py-4 text-xs text-slate-400">
-      <span className="block">当前项目</span>
+    <label className="min-w-48 text-xs text-muted">
+      <span className="sr-only">当前项目</span>
       <select
         aria-label="当前项目"
-        className="mt-1 block w-full rounded-md border border-white/15 bg-white/10 px-2 py-2 font-medium text-slate-100 outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="block w-full rounded-md border border-border bg-surface px-2 py-2 font-medium text-text outline-none focus-visible:ring-2 focus-visible:ring-primary"
         value={state.selectedId}
         onChange={(event) => {
           const selectedId = event.target.value;
@@ -98,7 +108,7 @@ export function ProjectSwitcher() {
             return;
           }
 
-          updateQueryProjectId(selectedId);
+          updateProjectQuery(selectedId);
           setState({ ...state, selectedId });
         }}
       >
@@ -117,28 +127,27 @@ function parseProjects(payload: unknown): Project[] {
     throw new Error("Project response must be an array");
   }
 
-  return payload.flatMap((item): Project[] => {
+  return payload.map((item, index): Project => {
+    const record = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null;
     if (
-      typeof item !== "object" ||
-      item === null ||
-      typeof item.id !== "string" ||
-      typeof item.name !== "string" ||
-      item.id.length === 0 ||
-      item.name.length === 0
+      record === null ||
+      typeof record.id !== "string" ||
+      typeof record.name !== "string" ||
+      record.id.length === 0 ||
+      record.name.length === 0
     ) {
-      return [];
+      throw new Error(`Project response entry ${index} is malformed`);
     }
 
-    return [{ id: item.id, name: item.name }];
+    return { id: record.id, name: record.name };
   });
 }
 
-function getQueryProjectId(): string | null {
-  return new URLSearchParams(window.location.search).get("project");
-}
-
-function updateQueryProjectId(projectId: string): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set("project", projectId);
-  window.history.replaceState(window.history.state, "", url);
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
 }

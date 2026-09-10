@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "../src/components/layout/app-shell";
 
@@ -13,7 +13,24 @@ const getFocusableElements = (container: HTMLElement) =>
   );
 
 describe("AppShell mobile navigation", () => {
-  afterEach(() => cleanup());
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("loads the shared project context once for desktop and mobile shell regions", async () => {
+    render(
+      <AppShell>
+        <p>内容</p>
+      </AppShell>,
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  });
 
   it("opens an accessible modal drawer, closes on Escape, and restores focus", () => {
     render(
