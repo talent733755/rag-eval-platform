@@ -11,17 +11,50 @@ durable queue.
 ## Current phase boundary
 
 This phase provides the public contract, safe runtime configuration, SQLAlchemy
-models, the `0002_document_ingestion` migration, and pure job-domain rules.
-It deliberately does not implement:
+models, the `0002_document_ingestion`/`0003_ingestion_contract_hardening`
+migrations, pure job-domain rules, a private local BlobStore, and bounded
+format parsers. It deliberately does not implement:
 
 - HTTP routes or multipart handling;
-- BlobStore or local/object-storage adapters;
-- PDF/DOCX/Markdown/TXT parsers;
 - a worker process or Compose worker service;
+- object-storage adapters;
 - provider calls or fabricated parse/candidate results.
 
-Those components must consume the v1 contract rather than reaching through
+Routes and workers must consume the v1 contract rather than reaching through
 these tables with ad-hoc status strings.
+
+## BlobStore boundary
+
+`rag_eval_api.storage.protocol.BlobStore` is intentionally small: `put`,
+`open`, `exists`, and `delete`. `LocalBlobStore` stores generated opaque keys
+under an absolute private root. It writes into a same-directory `0600` temp
+file, hashes and bounds the stream, fsyncs, then publishes with a no-overwrite
+hard-link operation. A key is accepted only when it matches the generated
+two-level grammar; path traversal, absolute paths, symlink resolution, and
+missing blobs fail closed. The root is never mounted as a public static path.
+
+The blob store returns metadata, not a user filename or filesystem path. Future
+S3-compatible backends must preserve the no-overwrite, checksum, size, cleanup,
+and redacted-log semantics of this contract.
+
+## Parser boundary
+
+`ParserRegistry` performs extension/MIME/signature allowlisting and reads a
+bounded byte stream before dispatching to the versioned PDF, DOCX, Markdown,
+or UTF-8 text parser. The parser output is `ParseResult` with raw content hash,
+parser version, page/paragraph counts, and contiguous `CanonicalChunk` values.
+Each chunk has canonical content, content hash, character/token counts, heading,
+ordinal, and a JSON-safe source location (`page`, `paragraph`, `line`, and
+optional `part`). The normalized output is deterministic and contains no input
+path or original filename.
+
+PDF limits are page count, normalized characters, and wall clock. DOCX limits
+are ZIP entries, aggregate uncompressed bytes, compression ratio, XML nesting,
+and normalized paragraphs/characters. ZIP absolute paths, `..` components, and
+symlink entries are rejected before XML parsing. Malformed/unsupported input
+is classified using the stable error taxonomy in the v1 contract. The parser
+modules do not perform network I/O; production deployments must add a
+non-privileged OS/container sandbox for hostile files.
 
 ## Logical flow
 
@@ -88,6 +121,7 @@ configuration, non-HTTPS provider URLs, and provider configuration without
 explicit host/port allowlists.
 
 Untrusted file execution limits, parser sandboxing, MIME/signature checks,
-atomic blob writes, SSRF-safe provider transport, and redacted observability
-belong to the later adapter/parser/worker phases and are required before those
-components are considered complete.
+atomic blob writes, and redacted storage/parser observability are implemented
+at the storage/parser boundary. SSRF-safe provider transport, durable worker
+execution, and request-level audit wiring remain later phases. In-process parser
+limits do not claim to replace OS-level memory/CPU isolation.

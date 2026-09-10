@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import hashlib
+import io
+from pathlib import Path
+
+import pytest
+
+from rag_eval_api.storage.errors import (
+    BlobChecksumMismatch,
+    BlobKeyError,
+    BlobNotFound,
+    BlobSizeExceeded,
+)
+from rag_eval_api.storage.local import LocalBlobStore
+
+
+def test_local_blob_store_writes_private_opaque_key_and_round_trips(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = LocalBlobStore(tmp_path / "blobs", max_bytes=32)
+
+    stored = store.put(io.BytesIO(b"hello"))
+
+    assert stored.byte_size == 5
+    assert stored.sha256 == hashlib.sha256(b"hello").hexdigest()
+    assert stored.storage_key.count("/") == 1
+    assert "hello" not in stored.storage_key
+    assert store.exists(stored.storage_key)
+    with store.open(stored.storage_key) as handle:
+        assert handle.read() == b"hello"
+    assert (tmp_path / "blobs").stat().st_mode & 0o077 == 0
+    assert (tmp_path / "blobs" / stored.storage_key).stat().st_mode & 0o077 == 0
+    assert str(tmp_path) not in caplog.text
+
+
+def test_local_blob_store_rejects_traversal_absolute_and_symlink_keys(tmp_path: Path) -> None:
+    store = LocalBlobStore(tmp_path / "blobs")
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"secret")
+
+    for key in ("../outside.txt", "/etc/passwd", "a/../../outside", "a/b/c"):
+        with pytest.raises(BlobKeyError):
+            store.exists(key)
+
+    link = tmp_path / "blobs" / "aa"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(tmp_path)
+    with pytest.raises(BlobKeyError):
+        store.exists("aa/outside.txt")
+
+
+def test_local_blob_store_enforces_size_checksum_and_cleans_temporary_files(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "blobs"
+    store = LocalBlobStore(root, max_bytes=4)
+
+    with pytest.raises(BlobSizeExceeded):
+        store.put(io.BytesIO(b"12345"))
+    with pytest.raises(BlobChecksumMismatch):
+        store.put(io.BytesIO(b"1234"), expected_sha256="0" * 64)
+
+    assert list(root.rglob(".upload-*")) == []
+    assert list(root.rglob("*")) == []
+
+
+def test_local_blob_store_does_not_overwrite_or_follow_existing_storage_path(tmp_path: Path) -> None:
+    store = LocalBlobStore(tmp_path / "blobs")
+    first = store.put(io.BytesIO(b"one"))
+    target = store._path_for_key(first.storage_key)
+
+    with pytest.raises(FileExistsError):
+        store._publish_temp_file(store._write_temp(io.BytesIO(b"two")), target)
+
+    assert target.read_bytes() == b"one"
+    store.delete(first.storage_key)
+    with pytest.raises(BlobNotFound), store.open(first.storage_key):
+        pass
+
+
+def test_local_blob_store_temp_file_is_removed_when_source_fails(tmp_path: Path) -> None:
+    class BrokenSource:
+        def read(self, _: int) -> bytes:
+            raise RuntimeError("source failed")
+
+    root = tmp_path / "blobs"
+    store = LocalBlobStore(root)
+
+    with pytest.raises(RuntimeError, match="source failed"):
+        store.put(BrokenSource())  # type: ignore[arg-type]
+
+    assert not any(path.name.startswith(".upload-") for path in root.rglob("*"))

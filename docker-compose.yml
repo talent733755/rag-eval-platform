@@ -43,8 +43,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL must be set in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in .env}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      BLOB_ROOT: ${BLOB_ROOT:?BLOB_ROOT must be set in .env}
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set in .env}
       REDIS_URL: ${COMPOSE_REDIS_URL:?COMPOSE_REDIS_URL must be set in .env}
+    volumes:
+      - blob_data:/var/lib/rag-eval/blobs
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,3 +70,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  blob_data:

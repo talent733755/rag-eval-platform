@@ -11,6 +11,7 @@ def test_document_ingestion_defaults_are_safe_and_provider_is_opt_in() -> None:
     assert settings.provider_base_url is None
     assert settings.provider_api_key is None
     assert settings.worker_lease_ttl_seconds == 60
+    assert settings.parser_limits().max_docx_compression_ratio == 100
 
 
 def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist() -> None:

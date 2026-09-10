@@ -18,6 +18,8 @@
 当前仓库已经包含可运行的项目基础设施和管理后台骨架：
 
 - `apps/api`：FastAPI API、健康检查、项目与成员基础接口、SQLAlchemy/Alembic 数据层和结构化错误响应；
+- `apps/api/src/rag_eval_api/storage`：私有、原子、不可覆盖的 LocalBlobStore；
+- `apps/api/src/rag_eval_api/parsers`：PDF、DOCX、Markdown、UTF-8 文本的有界解析器与 canonical chunk 契约；
 - `apps/web`：Next.js 管理后台壳层、权限感知菜单、项目切换器和占位业务页面；
 - `apps/web/src/lib/api/generated.ts`：由 FastAPI OpenAPI 文档生成的 TypeScript 类型；
 - `docker-compose.yml`：PostgreSQL、Redis、API 和 Web 的本地容器编排；
@@ -25,6 +27,29 @@
 - `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
 
 当前版本仍然是基础平台闭环，文档导入与评测集工厂、Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断、真实认证和异步任务编排尚未实现；这些边界会在后续迭代中按公共契约逐步加入。
+
+当前文档摄取阶段已经完成 BlobStore 与解析器基础设施，但还没有开放 HTTP 上传路由或
+worker 进程。直接调用它们的最小本地示例（不会联网，也不会调用模型）如下：
+
+```python
+from io import BytesIO
+
+from rag_eval_api.parsers.registry import ParserRegistry
+from rag_eval_api.storage.local import LocalBlobStore
+
+blob = LocalBlobStore("/var/lib/rag-eval/blobs")
+stored = blob.put(BytesIO(b"# Hello\n\nA deterministic chunk."))
+with blob.open(stored.storage_key) as source:
+    parsed = ParserRegistry().parse(
+        source,
+        filename="guide.md",
+        declared_mime="text/markdown",
+    )
+print(stored.sha256, parsed.parser_version, parsed.chunks[0].source_location)
+```
+
+生产部署仍需将 BlobStore 根目录放在非公开的持久化卷，并在非特权、资源受限的
+容器或等价 sandbox 中处理不可信文档；进程内 parser limits 不能替代操作系统隔离。
 
 ### 初始化
 

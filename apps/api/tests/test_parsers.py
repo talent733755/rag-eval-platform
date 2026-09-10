@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+import io
+import zipfile
+from pathlib import Path
+
+import pytest
+from docx import Document as DocxDocument
+
+from rag_eval_api.parsers.errors import (
+    MalformedDocumentError,
+    ParserLimitExceeded,
+    ParserSecurityError,
+    UnsupportedDocumentError,
+)
+from rag_eval_api.parsers.models import ParserLimits
+from rag_eval_api.parsers.registry import ParserRegistry
+
+
+def _docx_bytes() -> bytes:
+    document = DocxDocument()
+    document.add_heading("Safety", level=1)
+    document.add_paragraph("Keep the source location stable.")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _pdf_bytes() -> bytes:
+    stream = b"BT /F1 12 Tf (Hello PDF) Tj ET\n"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"endstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{number} 0 obj\n".encode())
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
+    )
+    return bytes(output)
+
+
+def test_registry_parses_txt_markdown_and_docx_with_deterministic_locations() -> None:
+    registry = ParserRegistry()
+
+    text = registry.parse(
+        io.BytesIO(b"Heading\n\nFirst paragraph.\n\nSecond paragraph."),
+        filename="guide.txt",
+        declared_mime="text/plain",
+    )
+    markdown = registry.parse(
+        io.BytesIO(b"# Heading\n\nFirst paragraph."),
+        filename="guide.md",
+        declared_mime="text/markdown",
+    )
+    docx = registry.parse(
+        io.BytesIO(_docx_bytes()),
+        filename="guide.docx",
+        declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    assert [chunk.content for chunk in text.chunks] == ["Heading", "First paragraph.", "Second paragraph."]
+    assert text.chunks[0].source_location == {"paragraph": 0}
+    assert markdown.chunks[0].heading == "Heading"
+    assert markdown.chunks[0].source_location["line"] == 1
+    assert docx.chunks[0].heading == "Safety"
+    assert docx.chunks[1].source_location == {"paragraph": 1}
+    assert text.content_hash == registry.parse(
+        io.BytesIO(b"Heading\n\nFirst paragraph.\n\nSecond paragraph."),
+        filename="guide.txt",
+        declared_mime="text/plain",
+    ).content_hash
+
+
+def test_registry_parses_pdf_and_reports_page_locations() -> None:
+    pdf = _pdf_bytes()
+    result = ParserRegistry().parse(io.BytesIO(pdf), filename="guide.pdf", declared_mime="application/pdf")
+
+    assert result.page_count == 1
+    assert result.chunks[0].source_location == {"page": 1}
+    assert "Hello PDF" in result.chunks[0].content
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime", "payload"),
+    [
+        ("guide.pdf", "text/plain", b"%PDF-1.4"),
+        ("guide.exe", "application/octet-stream", b"MZ not supported"),
+        ("guide.docx", "application/zip", b"not a zip"),
+    ],
+)
+def test_registry_classifies_unsupported_and_malformed_inputs(
+    filename: str, mime: str, payload: bytes
+) -> None:
+    with pytest.raises((UnsupportedDocumentError, MalformedDocumentError)):
+        ParserRegistry().parse(io.BytesIO(payload), filename=filename, declared_mime=mime)
+
+
+def test_registry_rejects_limits_and_zip_traversal(tmp_path: Path) -> None:
+    with pytest.raises(ParserLimitExceeded, match="characters"):
+        ParserRegistry().parse(
+            io.BytesIO(b"one\n\ntwo"),
+            filename="guide.txt",
+            declared_mime="text/plain",
+            limits=ParserLimits(max_normalized_characters=5),
+        )
+
+    malicious = io.BytesIO()
+    with zipfile.ZipFile(malicious, "w") as archive:
+        archive.writestr("../evil.txt", "bad")
+    with pytest.raises(MalformedDocumentError, match="ZIP"):
+        ParserRegistry().parse(
+            io.BytesIO(malicious.getvalue()),
+            filename="guide.docx",
+            declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    symlinked = io.BytesIO()
+    info = zipfile.ZipInfo("word/link.xml")
+    info.create_system = 3
+    info.external_attr = 0o120777 << 16
+    with zipfile.ZipFile(symlinked, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
+        archive.writestr(info, "../secret")
+    with pytest.raises(ParserSecurityError, match="symlink"):
+        ParserRegistry().parse(
+            io.BytesIO(symlinked.getvalue()),
+            filename="guide.docx",
+            declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+
+def test_registry_treats_filename_as_metadata_only() -> None:
+    result = ParserRegistry().parse(
+        io.BytesIO(b"safe content"),
+        filename="../../private/secrets.txt",
+        declared_mime="text/plain",
+    )
+
+    assert result.chunks[0].content == "safe content"
+
+
+def test_registry_accepts_empty_text_but_rejects_empty_or_truncated_pdf() -> None:
+    empty = ParserRegistry().parse(
+        io.BytesIO(b""), filename="empty.txt", declared_mime="text/plain"
+    )
+    assert empty.chunks == ()
+
+    with pytest.raises(UnsupportedDocumentError):
+        ParserRegistry().parse(
+            io.BytesIO(b""), filename="empty.pdf", declared_mime="application/pdf"
+        )
+    with pytest.raises(MalformedDocumentError):
+        ParserRegistry().parse(
+            io.BytesIO(b"%PDF-1.7"), filename="truncated.pdf", declared_mime="application/pdf"
+        )
+
+
+def test_docx_compression_ratio_is_bounded_before_document_parsing() -> None:
+    bomb = io.BytesIO()
+    with zipfile.ZipFile(bomb, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", b"<Types />", compress_type=zipfile.ZIP_STORED)
+        archive.writestr("word/document.xml", b"A" * 50_000)
+
+    with pytest.raises(ParserLimitExceeded, match="compression ratio"):
+        ParserRegistry().parse(
+            io.BytesIO(bomb.getvalue()),
+            filename="bomb.docx",
+            declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            limits=ParserLimits(max_docx_compression_ratio=2),
+        )

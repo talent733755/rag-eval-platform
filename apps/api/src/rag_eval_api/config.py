@@ -11,6 +11,8 @@ from uuid import UUID
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from rag_eval_api.parsers.models import ParserLimits
+
 APP_ENV_DEVELOPMENT: Literal["development"] = "development"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
@@ -94,6 +96,68 @@ class Settings(BaseSettings):
             validation_alias=AliasChoices("MAX_NORMALIZED_CHARACTERS", "max_normalized_characters"),
         ),
     ] = DEFAULT_MAX_NORMALIZED_CHARACTERS
+    max_parse_paragraphs: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=1_000_000,
+            validation_alias=AliasChoices("MAX_PARSE_PARAGRAPHS", "max_parse_paragraphs"),
+        ),
+    ] = 100_000
+    max_chunk_characters: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=100_000,
+            validation_alias=AliasChoices("MAX_CHUNK_CHARACTERS", "max_chunk_characters"),
+        ),
+    ] = 2_000
+    max_parser_wall_clock_seconds: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=300,
+            validation_alias=AliasChoices(
+                "MAX_PARSER_WALL_CLOCK_SECONDS", "max_parser_wall_clock_seconds"
+            ),
+        ),
+    ] = 10
+    max_docx_zip_entries: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=100_000,
+            validation_alias=AliasChoices("MAX_DOCX_ZIP_ENTRIES", "max_docx_zip_entries"),
+        ),
+    ] = 10_000
+    max_docx_uncompressed_bytes: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=1_000_000_000,
+            validation_alias=AliasChoices(
+                "MAX_DOCX_UNCOMPRESSED_BYTES", "max_docx_uncompressed_bytes"
+            ),
+        ),
+    ] = 100 * 1024 * 1024
+    max_docx_compression_ratio: Annotated[
+        float,
+        Field(
+            ge=1,
+            le=1_000,
+            validation_alias=AliasChoices(
+                "MAX_DOCX_COMPRESSION_RATIO", "max_docx_compression_ratio"
+            ),
+        ),
+    ] = 100.0
+    max_docx_xml_depth: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=10_000,
+            validation_alias=AliasChoices("MAX_DOCX_XML_DEPTH", "max_docx_xml_depth"),
+        ),
+    ] = 100
     worker_batch_size: Annotated[
         int,
         Field(
@@ -290,6 +354,22 @@ class Settings(BaseSettings):
                     "local database and Redis defaults are only allowed in development"
                 )
         return self
+
+    def parser_limits(self) -> ParserLimits:
+        """Return parser bounds without coupling parser modules to settings loading."""
+
+        return ParserLimits(
+            max_input_bytes=self.max_upload_bytes,
+            max_pages=self.max_parse_pages,
+            max_paragraphs=self.max_parse_paragraphs,
+            max_normalized_characters=self.max_normalized_characters,
+            max_chunk_characters=self.max_chunk_characters,
+            max_pdf_wall_clock_seconds=float(self.max_parser_wall_clock_seconds),
+            max_docx_zip_entries=self.max_docx_zip_entries,
+            max_docx_uncompressed_bytes=self.max_docx_uncompressed_bytes,
+            max_docx_compression_ratio=self.max_docx_compression_ratio,
+            max_docx_xml_depth=self.max_docx_xml_depth,
+        )
 
 
 def get_settings() -> Settings:
