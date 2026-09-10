@@ -45,6 +45,30 @@ make test
 make build
 ```
 
+### API 客户端与浏览器冒烟
+
+Web API 类型由 FastAPI 的真实 OpenAPI 文档生成，生成工具和版本锁定在
+`apps/web/package.json` 与 `pnpm-lock.yaml` 中。不要直接编辑生成文件；修改 API
+路由或 schema 后运行：
+
+```bash
+pnpm generate:web-api
+git diff --exit-code -- apps/web/src/lib/api/generated.ts
+```
+
+本地浏览器冒烟测试使用 Playwright，并在测试内拦截 `/api/projects` 为确定性项目数据，
+因此不依赖外部服务或真实用户凭据。首次运行需安装 Chromium：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --dir apps/web exec playwright install chromium
+pnpm --dir apps/web e2e
+```
+
+GitHub Actions 会在 Pull Request 和 `main` 分支 push 上运行 API/Web 质量门禁、本地
+PostgreSQL/Redis 集成检查、生成客户端 diff 校验和 Playwright 冒烟；浏览器失败时仅
+上传测试结果目录中的 trace 等诊断产物，不上传 secrets。
+
 使用 `make infra-down`（即 `docker compose down`）停止整个 Compose 项目，而不只是 PostgreSQL 和 Redis。非开发环境启动 API 前，必须将 `SECRET_KEY` 的本地占位符替换为生成的密钥。`.env`、本地生成的密钥和其他生成的敏感信息永远不会提交到版本库；请勿将真实凭据写入 `.env.example`。
 
 ## 产品定位

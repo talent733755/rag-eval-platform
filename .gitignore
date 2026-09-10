@@ -9,6 +9,8 @@ node_modules/
 dist/
 build/
 .next/
+apps/web/playwright-report/
+apps/web/test-results/
 coverage/
 __pycache__/
 *.py[cod]

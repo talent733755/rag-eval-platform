@@ -162,7 +162,10 @@ describe("project switcher", () => {
     expect(screen.getByRole("option", { name: "Alpha 项目" })).toBeVisible();
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/projects",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        headers: { Accept: "application/json" },
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 

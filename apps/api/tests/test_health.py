@@ -17,6 +17,19 @@ def test_liveness_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_openapi_exposes_the_versioned_project_contract(client: TestClient) -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    document = response.json()
+    assert document["openapi"].startswith("3.")
+    assert document["info"]["version"] == "0.1.0"
+    assert document["paths"]["/api/projects"]["get"]["operationId"] == (
+        "list_projects_api_projects_get"
+    )
+    assert document["paths"]["/api/projects/{project_id}/members"]["get"]["responses"]["200"]
+
+
 def test_liveness_does_not_contact_dependencies(
     client: TestClient,
     db_session: FakeDatabaseSession,

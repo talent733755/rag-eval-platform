@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "e2e": "playwright test",
     "build": "next build",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -19,6 +20,7 @@
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.2.0",
     "@types/node": "22.15.32",
@@ -29,6 +31,7 @@
     "eslint": "9.24.0",
     "eslint-config-next": "15.5.6",
     "jsdom": "26.0.0",
+    "openapi-typescript": "7.13.0",
     "postcss": "8.5.3",
     "tailwindcss": "3.4.17",
     "typescript": "5.8.3",

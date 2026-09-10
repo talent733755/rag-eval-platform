@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { ApiError, createApiClient } from "../../lib/api/client";
 import {
   getProjectIdFromSearch,
   updateProjectQuery,
@@ -48,13 +49,6 @@ const MAX_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_MAX_ATTEMPTS = 5;
 const MAX_RETRY_DELAY_MS = 5_000;
 const pendingRequests = new Map<string, SharedRequest>();
-
-class ProjectHttpError extends Error {
-  constructor(readonly status: number) {
-    super(`Project request failed with status ${status}`);
-    this.name = "ProjectHttpError";
-  }
-}
 
 class ProjectResponseError extends Error {
   constructor() {
@@ -333,18 +327,16 @@ async function requestProjectsOnce(endpoint: string, parentSignal: AbortSignal, 
   }, timeoutMs);
   parentSignal.addEventListener("abort", onParentAbort, { once: true });
 
-  const operation = fetch(endpoint, { signal: attemptController.signal }).then(async (response) => {
-    if (!response.ok) {
-      throw new ProjectHttpError(response.status);
-    }
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new ProjectResponseError();
-    }
-    return parseProjects(payload);
-  });
+  const apiBaseUrl = endpoint.slice(0, -"/api/projects".length);
+  const operation = createApiClient({ baseUrl: apiBaseUrl, fetchImpl: fetch })
+    .listProjects({ signal: attemptController.signal })
+    .then((payload) => parseProjects(payload))
+    .catch((error: unknown) => {
+      if (error instanceof SyntaxError) {
+        throw new ProjectResponseError();
+      }
+      throw error;
+    });
   let onAttemptAbort: (() => void) | undefined;
   const abort = new Promise<never>((_resolve, reject) => {
     onAttemptAbort = () => reject(createAbortError());
@@ -441,7 +433,7 @@ function isRetryableProjectError(error: unknown): boolean {
   ) {
     return false;
   }
-  if (error instanceof ProjectHttpError) {
+  if (error instanceof ApiError) {
     return error.status === 408 || error.status === 429 || (error.status >= 500 && error.status !== 501);
   }
   return error instanceof ProjectTimeoutError || error instanceof Error;
@@ -454,7 +446,7 @@ function createAbortError(): Error {
 }
 
 function getProjectErrorMessage(error: unknown): string {
-  if (error instanceof ProjectHttpError) {
+  if (error instanceof ApiError) {
     if (error.status === 408 || error.status === 429 || (error.status >= 500 && error.status !== 501)) {
       return `项目加载失败（HTTP ${error.status}），请稍后重试。`;
     }

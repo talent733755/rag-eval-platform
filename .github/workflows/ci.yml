@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-quality:
+    name: API quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.12"
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API dependencies
+        run: uv sync --directory apps/api --locked
+
+      - name: Run API lint
+        run: uv run --directory apps/api ruff check .
+
+      - name: Run API typecheck
+        run: uv run --directory apps/api mypy src
+
+      - name: Run API tests
+        run: uv run --directory apps/api pytest -q
+
+  web-quality:
+    name: Web quality and API contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.12"
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install workspace dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --directory apps/api --locked
+
+      - name: Verify generated API client
+        run: |
+          pnpm generate:web-api
+          git diff --exit-code -- apps/web/src/lib/api/generated.ts
+
+      - name: Run web lint
+        run: pnpm --dir apps/web lint
+
+      - name: Run web typecheck
+        run: pnpm --dir apps/web typecheck
+
+      - name: Run web tests
+        run: pnpm --dir apps/web test
+
+      - name: Build web application
+        run: pnpm --dir apps/web build
+
+  integration:
+    name: Local API integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.12"
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API dependencies
+        run: uv sync --directory apps/api --locked
+
+      - name: Configure local services
+        run: cp .env.example .env
+
+      - name: Start PostgreSQL and Redis
+        run: make infra-up
+
+      - name: Wait for local services
+        run: bash scripts/wait-for-services.sh
+
+      - name: Apply database migrations
+        run: uv run --directory apps/api alembic upgrade head
+
+      - name: Start API
+        run: |
+          uv run --directory apps/api uvicorn rag_eval_api.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          echo $! > api.pid
+
+      - name: Probe API contract and health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/live >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/health/live
+          curl --fail --silent http://127.0.0.1:8000/openapi.json >/dev/null
+
+      - name: Show API logs on failure
+        if: failure()
+        run: test ! -f api.log || tail -n 200 api.log
+
+      - name: Stop API
+        if: always()
+        run: test ! -f api.pid || kill "$(cat api.pid)" || true
+
+      - name: Stop local services
+        if: always()
+        run: docker compose down -v
+
+  playwright-smoke:
+    name: Playwright admin shell smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Run admin shell smoke
+        run: pnpm --dir apps/web e2e
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          if-no-files-found: ignore
