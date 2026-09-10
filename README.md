@@ -13,11 +13,22 @@
 - GNU Make
 - Docker Engine 或 Docker Desktop，以及 Docker Compose
 
-### 初始化（后续基础设施任务完成后）
+### 当前仓库状态
 
-当前仓库只包含工作区命令和文档配置；`docker-compose.yml`、`apps/api` 和 `apps/web` 将由后续基础设施与应用基础任务提供。因此，在这些任务完成前，`make infra-up` 不能启动服务，下面列出的 API/Web 地址也尚未提供。
+当前仓库已经包含可运行的项目基础设施和管理后台骨架：
 
-完成后续基础设施任务后，在仓库根目录执行：
+- `apps/api`：FastAPI API、健康检查、项目与成员基础接口、SQLAlchemy/Alembic 数据层和结构化错误响应；
+- `apps/web`：Next.js 管理后台壳层、权限感知菜单、项目切换器和占位业务页面；
+- `apps/web/src/lib/api/generated.ts`：由 FastAPI OpenAPI 文档生成的 TypeScript 类型；
+- `docker-compose.yml`：PostgreSQL、Redis、API 和 Web 的本地容器编排；
+- `.github/workflows/ci.yml`：API/Web 质量门禁、本地集成检查、OpenAPI client diff 校验和 Playwright smoke；
+- `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
+
+当前版本仍然是基础平台闭环，文档导入与评测集工厂、Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断、真实认证和异步任务编排尚未实现；这些边界会在后续迭代中按公共契约逐步加入。
+
+### 初始化
+
+在仓库根目录执行。`make install` 使用已提交的 `pnpm-lock.yaml` 和 `apps/api/uv.lock`，确保依赖可复现：
 
 ```bash
 make install
@@ -25,18 +36,27 @@ cp .env.example .env
 make infra-up
 ```
 
+`make infra-up` 只启动 PostgreSQL 和 Redis。启动 API 和 Web 开发服务：
+
+```bash
+uv run --directory apps/api uvicorn rag_eval_api.main:app --reload --host 0.0.0.0 --port 8000
+corepack pnpm --dir apps/web dev
+```
+
+也可以在完成 `.env` 配置后使用 `docker compose up -d` 启动 Compose 中定义的全部服务。
+
 Web 壳层通过 `GET /api/projects` 加载当前 actor 可见的项目。可用
 `NEXT_PUBLIC_API_BASE_URL` 指向 API 地址；未设置时默认为
 `http://localhost:8000`。项目选择保存在 URL 的 `project` 查询参数中，API
 加载失败或 URL 中的项目不可见时不会自动切换到其他项目。
 
-`make infra-up` 只启动 PostgreSQL 和 Redis，不会启动 API 或 Web。待后续任务加入 `apps/api` 和 `apps/web` 后，还需要分别执行各自的 API/Web 启动命令；完成并启动这两个应用后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。
+启动 API 和 Web 后，API 地址为 <http://localhost:8000>，Web 地址为 <http://localhost:3000>。API 的 OpenAPI 文档地址为 <http://localhost:8000/openapi.json>。
 
 当 API 运行在 Compose 容器中时，Compose 配置必须将 `COMPOSE_DATABASE_URL` 和 `COMPOSE_REDIS_URL` 注入容器内的 `DATABASE_URL` 和 `REDIS_URL`。这两个 Compose 连接串使用内部服务 DNS 名称 `postgres` 和 `redis`，容器间连接不能使用 `localhost`。
 
 ### 质量检查
 
-提交变更前执行以下四个质量命令。它们是本项目要求的质量门禁；待 `apps/api` 和 `apps/web` 加入后即可完整执行：
+提交变更前执行以下四个质量命令。它们是本项目要求的质量门禁：
 
 ```bash
 make lint
@@ -64,6 +84,12 @@ pnpm install --frozen-lockfile
 pnpm --dir apps/web exec playwright install chromium
 pnpm --dir apps/web e2e
 ```
+
+已知本机限制：某些 macOS 环境启动 Playwright Chromium 可能返回系统错误 `-88`。
+这表示本机浏览器运行时不兼容，不代表 Web 代码或冒烟断言失败；遇到此问题时，建议
+使用 GitHub Actions 的 Ubuntu runner，或在 Linux/Docker 环境运行。失败时的 trace、
+截图和视频等诊断产物位于本地 `apps/web/test-results/`；GitHub Actions 会将该目录
+作为 `playwright-traces` artifact 上传。
 
 GitHub Actions 会在 Pull Request 和 `main` 分支 push 上运行 API/Web 质量门禁、本地
 PostgreSQL/Redis 集成检查、生成客户端 diff 校验和 Playwright 冒烟；浏览器失败时仅

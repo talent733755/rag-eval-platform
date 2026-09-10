@@ -1,7 +1,8 @@
 .PHONY: install lint typecheck test build infra-up infra-down
 
 install:
-	corepack pnpm install
+	corepack pnpm install --frozen-lockfile
+	uv sync --directory apps/api --locked
 
 lint:
 	corepack pnpm lint && uv run --directory apps/api ruff check .
