@@ -18,6 +18,7 @@ from rag_eval_api.models.documents import (
     DocumentVersion,
 )
 from rag_eval_api.models.ingestion import (
+    IngestionAttemptFinalStatus,
     IngestionJob,
     IngestionJobAttempt,
     IngestionJobKind,
@@ -44,6 +45,7 @@ __all__ = [
     "DocumentVersion",
     "IngestionJob",
     "IngestionJobAttempt",
+    "IngestionAttemptFinalStatus",
     "IngestionJobKind",
     "IngestionJobLease",
     "IngestionJobStatus",

@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from rag_eval_api.services.ingestion_jobs import (
+    INGESTION_ERROR_CODES,
     IdempotencyConflict,
     IngestionJobState,
     InvalidJobTransition,
@@ -20,6 +21,10 @@ def test_job_state_machine_accepts_only_documented_transitions() -> None:
 
     with pytest.raises(InvalidJobTransition):
         IngestionJobState.transition("succeeded", "processing")
+    with pytest.raises(InvalidJobTransition):
+        IngestionJobState.transition("unknown", "processing")
+    with pytest.raises(InvalidJobTransition):
+        IngestionJobState.transition("processing", "queued")
 
 
 def test_retry_requires_retryable_failure_or_explicit_blocked_resolution() -> None:
@@ -30,6 +35,8 @@ def test_retry_requires_retryable_failure_or_explicit_blocked_resolution() -> No
         IngestionJobState.retry_target("failed", retryable=False)
     with pytest.raises(InvalidJobTransition):
         IngestionJobState.retry_target("cancelled", retryable=True)
+    with pytest.raises(InvalidJobTransition):
+        IngestionJobState.retry_target("succeeded", retryable=True)
 
 
 def test_cancel_and_block_follow_terminal_and_provider_configuration_rules() -> None:
@@ -47,6 +54,7 @@ def test_idempotency_replay_is_allowed_but_fingerprint_conflict_is_rejected() ->
 
     with pytest.raises(IdempotencyConflict):
         ensure_idempotency(scope, "fingerprint-b", "fingerprint-a")
+    assert {"duplicate_document", "idempotency_conflict"} <= INGESTION_ERROR_CODES
 
 
 def test_lease_claim_heartbeat_and_fencing_reject_stale_workers() -> None:

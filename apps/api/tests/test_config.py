@@ -29,3 +29,33 @@ def test_provider_credentials_are_not_part_of_safe_configuration_dump() -> None:
     settings = Settings(_env_file=None, provider_api_key=SecretStr("super-secret"))
     rendered = repr(settings) + str(settings.model_dump())
     assert "super-secret" not in rendered
+
+
+def test_provider_url_requires_allowlisted_hostname_and_port() -> None:
+    base = {
+        "_env_file": None,
+        "provider_api_key": SecretStr("super-secret"),
+        "provider_allowed_hosts": ["api.example.com"],
+        "provider_allowed_ports": [443],
+    }
+    assert Settings(**base, provider_base_url="https://api.example.com/v1").provider_base_url
+
+    with pytest.raises(ValueError, match="hostname"):
+        Settings(**base, provider_base_url="https://other.example.com/v1")
+    with pytest.raises(ValueError, match="port"):
+        Settings(**base, provider_base_url="https://api.example.com:8443/v1")
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://user:password@api.example.com/v1", "https://user@api.example.com/v1"],
+)
+def test_provider_url_rejects_embedded_credentials(url: str) -> None:
+    with pytest.raises(ValueError, match="credentials"):
+        Settings(
+            _env_file=None,
+            provider_base_url=url,
+            provider_api_key=SecretStr("super-secret"),
+            provider_allowed_hosts=["api.example.com"],
+            provider_allowed_ports=[443],
+        )

@@ -22,6 +22,7 @@ INGESTION_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "provider_timeout",
         "provider_invalid_output",
         "cancelled",
+        "duplicate_document",
         "lease_lost",
         "idempotency_conflict",
     }

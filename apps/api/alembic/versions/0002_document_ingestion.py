@@ -30,7 +30,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("project_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("display_name", sa.String(length=255), nullable=False),
-        sa.Column("source_type", sa.String(length=9), nullable=False),
+        sa.Column("source_type", sa.String(length=8), nullable=False),
         sa.Column("latest_version_id", sa.Uuid(as_uuid=True), nullable=True),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
@@ -127,6 +127,16 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "document_id", "version_number", name="uq_document_versions_document_version_number"
         ),
+        sa.UniqueConstraint(
+            "organization_id",
+            "project_id",
+            "sha256",
+            "byte_size",
+            name="uq_document_versions_project_content_identity",
+        ),
+        sa.CheckConstraint(
+            "sha256 ~ '^[0-9a-f]{64}$'", name=conv("ck_document_versions_sha256_lower_hex_64")
+        ),
     )
     op.create_index(
         "ix_document_versions_organization_id", "document_versions", ["organization_id"]
@@ -194,6 +204,17 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "document_version_id", "ordinal", name="uq_document_chunks_version_ordinal"
+        ),
+        sa.UniqueConstraint(
+            "id",
+            "document_version_id",
+            "organization_id",
+            "project_id",
+            name="uq_document_chunks_version_tenant_identity",
+        ),
+        sa.CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_document_chunks_content_hash_lower_hex_64"),
         ),
     )
     for column in ("organization_id", "project_id", "document_version_id"):
@@ -332,6 +353,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("project_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("dataset_id", sa.Uuid(as_uuid=True), nullable=False),
+        sa.Column("generation_config_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("source_version_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("question", sa.Text(), nullable=False),
         sa.Column("question_type", sa.String(length=100), nullable=False),
@@ -378,6 +400,16 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
+            ["generation_config_id", "organization_id", "project_id"],
+            [
+                "candidate_generation_configs.id",
+                "candidate_generation_configs.organization_id",
+                "candidate_generation_configs.project_id",
+            ],
+            name="fk_candidate_dataset_items_generation_config_tenant",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
             ["project_id", "organization_id"],
             ["projects.id", "projects.organization_id"],
             name="fk_candidate_dataset_items_project_organization_projects",
@@ -387,8 +419,21 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "id", "organization_id", "project_id", name="uq_candidate_dataset_items_tenant_identity"
         ),
+        sa.UniqueConstraint(
+            "id",
+            "source_version_id",
+            "organization_id",
+            "project_id",
+            name="uq_candidate_dataset_items_source_version_tenant_identity",
+        ),
     )
-    for column in ("organization_id", "project_id", "dataset_id", "source_version_id"):
+    for column in (
+        "organization_id",
+        "project_id",
+        "dataset_id",
+        "generation_config_id",
+        "source_version_id",
+    ):
         op.create_index(f"ix_candidate_dataset_items_{column}", "candidate_dataset_items", [column])
     op.create_index(
         "ix_candidate_dataset_items_dataset_review",
@@ -402,6 +447,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("project_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("item_id", sa.Uuid(as_uuid=True), nullable=False),
+        sa.Column("source_version_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("chunk_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("ordinal", sa.Integer(), nullable=False),
         sa.Column("excerpt", sa.Text(), nullable=True),
@@ -415,9 +461,10 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["item_id", "organization_id", "project_id"],
+            ["item_id", "source_version_id", "organization_id", "project_id"],
             [
                 "candidate_dataset_items.id",
+                "candidate_dataset_items.source_version_id",
                 "candidate_dataset_items.organization_id",
                 "candidate_dataset_items.project_id",
             ],
@@ -425,8 +472,23 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["chunk_id", "organization_id", "project_id"],
-            ["document_chunks.id", "document_chunks.organization_id", "document_chunks.project_id"],
+            ["source_version_id", "organization_id", "project_id"],
+            [
+                "document_versions.id",
+                "document_versions.organization_id",
+                "document_versions.project_id",
+            ],
+            name="fk_candidate_item_evidence_source_version_tenant",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["chunk_id", "source_version_id", "organization_id", "project_id"],
+            [
+                "document_chunks.id",
+                "document_chunks.document_version_id",
+                "document_chunks.organization_id",
+                "document_chunks.project_id",
+            ],
             name="fk_candidate_item_evidence_chunk_tenant",
             ondelete="RESTRICT",
         ),
@@ -441,7 +503,7 @@ def upgrade() -> None:
             "item_id", "chunk_id", "ordinal", name="uq_candidate_item_evidence_item_chunk_ordinal"
         ),
     )
-    for column in ("organization_id", "project_id", "item_id", "chunk_id"):
+    for column in ("organization_id", "project_id", "item_id", "source_version_id", "chunk_id"):
         op.create_index(f"ix_candidate_item_evidence_{column}", "candidate_item_evidence", [column])
     op.create_index(
         "ix_candidate_item_evidence_project_item",
@@ -454,7 +516,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("organization_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("project_id", sa.Uuid(as_uuid=True), nullable=False),
-        sa.Column("job_kind", sa.String(length=20), nullable=False),
+        sa.Column("job_kind", sa.String(length=19), nullable=False),
         sa.Column("status", sa.String(length=10), nullable=False),
         sa.Column("document_version_id", sa.Uuid(as_uuid=True), nullable=True),
         sa.Column("candidate_dataset_id", sa.Uuid(as_uuid=True), nullable=True),
@@ -524,6 +586,9 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_ingestion_jobs"),
         sa.UniqueConstraint(
+            "id", "organization_id", "project_id", name="uq_ingestion_jobs_tenant_identity"
+        ),
+        sa.UniqueConstraint(
             "organization_id",
             "project_id",
             "job_kind",
@@ -548,7 +613,7 @@ def upgrade() -> None:
         sa.Column("job_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("attempt_number", sa.Integer(), nullable=False),
         sa.Column("worker_id", sa.String(length=255), nullable=False),
-        sa.Column("final_status", sa.String(length=10), nullable=False),
+        sa.Column("final_status", sa.String(length=9), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("input_snapshot", sa.JSON(), nullable=False),
@@ -651,6 +716,23 @@ def upgrade() -> None:
         ondelete="RESTRICT",
     )
 
+    for table in (
+        "documents",
+        "document_versions",
+        "candidate_datasets",
+        "candidate_dataset_items",
+        "ingestion_jobs",
+        "ingestion_job_leases",
+    ):
+        op.execute(
+            f"""
+            CREATE TRIGGER {table}_set_updated_at
+            BEFORE UPDATE ON {table}
+            FOR EACH ROW
+            EXECUTE FUNCTION public.rag_eval_set_updated_at()
+            """
+        )
+
     op.execute(
         """
         CREATE OR REPLACE FUNCTION public.rag_eval_prevent_ingestion_history_mutation()
@@ -683,8 +765,83 @@ def upgrade() -> None:
         )
         op.execute(f"REVOKE UPDATE, DELETE, TRUNCATE ON TABLE {table} FROM PUBLIC")
 
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION public.rag_eval_prevent_document_version_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'document version source bytes are immutable'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            IF OLD.document_id IS DISTINCT FROM NEW.document_id
+                OR OLD.version_number IS DISTINCT FROM NEW.version_number
+                OR OLD.sha256 IS DISTINCT FROM NEW.sha256
+                OR OLD.byte_size IS DISTINCT FROM NEW.byte_size
+                OR OLD.detected_mime IS DISTINCT FROM NEW.detected_mime
+                OR OLD.storage_key IS DISTINCT FROM NEW.storage_key THEN
+                RAISE EXCEPTION 'document version source bytes are immutable'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER document_versions_source_bytes_guard
+        BEFORE UPDATE OR DELETE ON document_versions
+        FOR EACH ROW
+        EXECUTE FUNCTION public.rag_eval_prevent_document_version_mutation()
+        """
+    )
+    op.execute("REVOKE DELETE ON TABLE document_versions FROM PUBLIC")
+
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION public.rag_eval_prevent_generation_config_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RAISE EXCEPTION 'candidate generation config snapshots are immutable'
+                USING ERRCODE = 'restrict_violation';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER candidate_generation_configs_immutable_guard
+        BEFORE UPDATE OR DELETE ON candidate_generation_configs
+        FOR EACH ROW
+        EXECUTE FUNCTION public.rag_eval_prevent_generation_config_mutation()
+        """
+    )
+    op.execute("REVOKE UPDATE, DELETE, TRUNCATE ON TABLE candidate_generation_configs FROM PUBLIC")
+
 
 def downgrade() -> None:
+    for table in (
+        "documents",
+        "document_versions",
+        "candidate_datasets",
+        "candidate_dataset_items",
+        "ingestion_jobs",
+        "ingestion_job_leases",
+    ):
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_set_updated_at ON {table}")
+    op.execute(
+        "DROP TRIGGER IF EXISTS document_versions_source_bytes_guard ON document_versions"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS candidate_generation_configs_immutable_guard ON candidate_generation_configs"
+    )
+    op.execute("DROP FUNCTION IF EXISTS public.rag_eval_prevent_document_version_mutation()")
+    op.execute("DROP FUNCTION IF EXISTS public.rag_eval_prevent_generation_config_mutation()")
     for table in ("document_chunks", "candidate_item_evidence", "ingestion_job_attempts"):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_truncate_guard ON {table}")
         op.execute(f"DROP TRIGGER IF EXISTS {table}_append_only ON {table}")

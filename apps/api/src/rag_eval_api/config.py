@@ -229,7 +229,12 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             raise ValueError("PROVIDER_BASE_URL must be an absolute HTTP(S) URL without credentials")
         parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username:
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
             raise ValueError(
                 "PROVIDER_BASE_URL must be an absolute HTTP(S) URL without credentials"
             )
@@ -250,13 +255,26 @@ class Settings(BaseSettings):
             raise ValueError("WORKER_HEARTBEAT_INTERVAL_SECONDS must be less than lease TTL")
         if "*" in self.provider_allowed_hosts:
             raise ValueError("PROVIDER_ALLOWED_HOSTS cannot contain wildcard entries")
-        if self.provider_base_url is not None and self.app_env != APP_ENV_DEVELOPMENT:
-            if urlsplit(self.provider_base_url).scheme != "https":
+        if self.provider_base_url is not None:
+            parsed_provider_url = urlsplit(self.provider_base_url)
+            if self.app_env != APP_ENV_DEVELOPMENT and parsed_provider_url.scheme != "https":
                 raise ValueError("PROVIDER_BASE_URL must use HTTPS outside development")
             if not self.provider_allowed_hosts or not self.provider_allowed_ports:
                 raise ValueError(
                     "provider host and port allowlists are required when provider is enabled"
                 )
+            provider_hostname = parsed_provider_url.hostname
+            if provider_hostname is None:
+                raise ValueError("PROVIDER_BASE_URL must include a hostname")
+            if provider_hostname.lower() not in self.provider_allowed_hosts:
+                raise ValueError("PROVIDER_BASE_URL hostname must be in PROVIDER_ALLOWED_HOSTS")
+            try:
+                provider_port = parsed_provider_url.port
+            except ValueError as exc:
+                raise ValueError("PROVIDER_BASE_URL has an invalid port") from exc
+            effective_port = provider_port or (443 if parsed_provider_url.scheme == "https" else 80)
+            if effective_port not in self.provider_allowed_ports:
+                raise ValueError("PROVIDER_BASE_URL port must be in PROVIDER_ALLOWED_PORTS")
         if self.provider_base_url is not None and self.provider_api_key is None:
             raise ValueError("PROVIDER_API_KEY is required when provider is enabled")
         if self.dev_actor_id is not None and self.app_env != APP_ENV_DEVELOPMENT:

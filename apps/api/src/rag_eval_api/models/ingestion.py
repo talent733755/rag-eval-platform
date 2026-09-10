@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -42,6 +43,16 @@ class IngestionJobStatus(str, Enum):
     succeeded = "succeeded"
     partial = "partial"
     failed = "failed"
+    cancelled = "cancelled"
+
+
+class IngestionAttemptFinalStatus(str, Enum):
+    """Terminal outcomes persisted in append-only attempt history."""
+
+    succeeded = "succeeded"
+    partial = "partial"
+    failed = "failed"
+    blocked = "blocked"
     cancelled = "cancelled"
 
 
@@ -82,6 +93,9 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
             "job_kind",
             "idempotency_key",
             name="uq_ingestion_jobs_project_operation_idempotency",
+        ),
+        UniqueConstraint(
+            "id", "organization_id", "project_id", name="uq_ingestion_jobs_tenant_identity"
         ),
         CheckConstraint(
             "((job_kind = 'parse' AND document_version_id IS NOT NULL AND candidate_dataset_id IS NULL) "
@@ -198,12 +212,13 @@ class IngestionJobAttempt(UUIDPrimaryKeyMixin, Base):
     job_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     attempt_number: Mapped[int] = mapped_column(nullable=False)
     worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    final_status: Mapped[IngestionJobStatus] = mapped_column(
+    final_status: Mapped[IngestionAttemptFinalStatus] = mapped_column(
         SqlEnum(
-            IngestionJobStatus,
-            name="ingestion_attempt_status",
+            IngestionAttemptFinalStatus,
+            name="ingestion_attempt_final_status",
             native_enum=False,
             create_constraint=True,
+            length=9,
         ),
         nullable=False,
     )
@@ -213,7 +228,7 @@ class IngestionJobAttempt(UUIDPrimaryKeyMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     retryable: Mapped[bool] = mapped_column(nullable=False)
-    fencing_token: Mapped[int] = mapped_column(nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger(), nullable=False)
 
     organization: Mapped[Organization] = relationship(
         back_populates="ingestion_job_attempts", overlaps="project,job"
@@ -246,7 +261,7 @@ class IngestionJobLease(UUIDPrimaryKeyMixin, Base):
         UniqueConstraint("job_id", name="uq_ingestion_job_leases_job"),
         CheckConstraint("attempt_number > 0", name="attempt_number_positive"),
         CheckConstraint("fencing_token > 0", name="fencing_token_positive"),
-        Index("ix_ingestion_job_leases_expiry", "lease_expires_at"),
+        Index("ix_ingestion_job_leases_lease_expires_at", "lease_expires_at"),
     )
 
     organization_id: Mapped[UUID] = mapped_column(
@@ -258,7 +273,7 @@ class IngestionJobLease(UUIDPrimaryKeyMixin, Base):
     worker_id: Mapped[str] = mapped_column(String(255), nullable=False)
     lease_expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     heartbeat_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
-    fencing_token: Mapped[int] = mapped_column(nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         nullable=False,

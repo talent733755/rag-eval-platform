@@ -72,6 +72,7 @@ class CandidateDataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="candidate_dataset_status",
             native_enum=False,
             create_constraint=True,
+            length=9,
         ),
         nullable=False,
     )
@@ -163,6 +164,22 @@ class CandidateGenerationConfig(UUIDPrimaryKeyMixin, Base):
     )
 
 
+@event.listens_for(CandidateGenerationConfig, "before_update")
+def _reject_generation_config_update(
+    mapper: object, connection: object, target: CandidateGenerationConfig
+) -> None:
+    del mapper, connection, target
+    raise ValueError("CandidateGenerationConfig records are immutable snapshots")
+
+
+@event.listens_for(CandidateGenerationConfig, "before_delete")
+def _reject_generation_config_delete(
+    mapper: object, connection: object, target: CandidateGenerationConfig
+) -> None:
+    del mapper, connection, target
+    raise ValueError("CandidateGenerationConfig records are immutable snapshots")
+
+
 class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A generated candidate with review state and immutable provenance."""
 
@@ -189,6 +206,16 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["generation_config_id", "organization_id", "project_id"],
+            [
+                "candidate_generation_configs.id",
+                "candidate_generation_configs.organization_id",
+                "candidate_generation_configs.project_id",
+            ],
+            name="fk_candidate_dataset_items_generation_config_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["project_id", "organization_id"],
             ["projects.id", "projects.organization_id"],
             name="fk_candidate_dataset_items_project_organization_projects",
@@ -196,6 +223,13 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         UniqueConstraint(
             "id", "organization_id", "project_id", name="uq_candidate_dataset_items_tenant_identity"
+        ),
+        UniqueConstraint(
+            "id",
+            "source_version_id",
+            "organization_id",
+            "project_id",
+            name="uq_candidate_dataset_items_source_version_tenant_identity",
         ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         Index("ix_candidate_dataset_items_dataset_review", "dataset_id", "review_status"),
@@ -206,6 +240,7 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     dataset_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    generation_config_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     source_version_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     question_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -233,6 +268,9 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     dataset: Mapped[CandidateDataset] = relationship(
         back_populates="items", overlaps="organization,project,evidence"
     )
+    generation_config: Mapped[CandidateGenerationConfig] = relationship(
+        viewonly=True, overlaps="organization,project,dataset,evidence,items"
+    )
     evidence: Mapped[list[CandidateItemEvidence]] = relationship(
         back_populates="item", cascade="save-update, merge", passive_deletes=True,
         overlaps="organization,project,dataset,chunk",
@@ -245,9 +283,10 @@ class CandidateItemEvidence(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "candidate_item_evidence"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["item_id", "organization_id", "project_id"],
+            ["item_id", "source_version_id", "organization_id", "project_id"],
             [
                 "candidate_dataset_items.id",
+                "candidate_dataset_items.source_version_id",
                 "candidate_dataset_items.organization_id",
                 "candidate_dataset_items.project_id",
             ],
@@ -255,8 +294,23 @@ class CandidateItemEvidence(UUIDPrimaryKeyMixin, Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["chunk_id", "organization_id", "project_id"],
-            ["document_chunks.id", "document_chunks.organization_id", "document_chunks.project_id"],
+            ["source_version_id", "organization_id", "project_id"],
+            [
+                "document_versions.id",
+                "document_versions.organization_id",
+                "document_versions.project_id",
+            ],
+            name="fk_candidate_item_evidence_source_version_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["chunk_id", "source_version_id", "organization_id", "project_id"],
+            [
+                "document_chunks.id",
+                "document_chunks.document_version_id",
+                "document_chunks.organization_id",
+                "document_chunks.project_id",
+            ],
             name="fk_candidate_item_evidence_chunk_tenant",
             ondelete="RESTRICT",
         ),
@@ -280,6 +334,7 @@ class CandidateItemEvidence(UUIDPrimaryKeyMixin, Base):
     )
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     item_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    source_version_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     chunk_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     ordinal: Mapped[int] = mapped_column(nullable=False)
     excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)

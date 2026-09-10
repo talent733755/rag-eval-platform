@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, UniqueConstraint
 
 from rag_eval_api.models import (
     Base,
@@ -55,6 +55,24 @@ def test_ingestion_model_constraints_cover_idempotency_and_immutable_history() -
         isinstance(constraint, UniqueConstraint)
         and {column.name for column in constraint.columns} == {"item_id", "chunk_id", "ordinal"}
         for constraint in CandidateItemEvidence.__table__.constraints
+    )
+    assert any(
+        isinstance(constraint, UniqueConstraint)
+        and {column.name for column in constraint.columns}
+        == {"id", "organization_id", "project_id"}
+        for constraint in IngestionJob.__table__.constraints
+    )
+    assert CandidateDatasetItem.__table__.c.generation_config_id is not None
+    assert CandidateItemEvidence.__table__.c.source_version_id is not None
+    assert isinstance(DocumentVersion.__table__.c.byte_size.type, BigInteger)
+    assert isinstance(IngestionJobLease.__table__.c.fencing_token.type, BigInteger)
+    assert any(
+        isinstance(constraint, CheckConstraint) and "sha256" in str(constraint.sqltext)
+        for constraint in DocumentVersion.__table__.constraints
+    )
+    assert any(
+        isinstance(constraint, CheckConstraint) and "content_hash" in str(constraint.sqltext)
+        for constraint in DocumentChunk.__table__.constraints
     )
     assert Document.__table__.c.latest_version_id.nullable
     assert DocumentVersion.__table__.c.storage_key.unique is not True

@@ -19,3 +19,6 @@ __all__ = [
     "ProjectCreate",
     "ProjectResponse",
 ]
+from rag_eval_api.schemas.ingestion import DocumentContentIdentity, Sha256Hex
+
+__all__ = ["DocumentContentIdentity", "Sha256Hex"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -9,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     event,
+    inspect,
 )
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -89,6 +92,7 @@ class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="document_source_type",
             native_enum=False,
             create_constraint=True,
+            length=8,
         ),
         nullable=False,
     )
@@ -141,8 +145,19 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "document_id", "version_number", name="uq_document_versions_document_version_number"
         ),
+        UniqueConstraint(
+            "organization_id",
+            "project_id",
+            "sha256",
+            "byte_size",
+            name="uq_document_versions_project_content_identity",
+        ),
         CheckConstraint("version_number > 0", name="version_number_positive"),
         CheckConstraint("byte_size > 0", name="byte_size_positive"),
+        CheckConstraint("length(sha256) = 64", name="sha256_length_64"),
+        CheckConstraint(
+            "sha256 ~ '^[0-9a-f]{64}$'", name="sha256_lower_hex_64"
+        ).ddl_if(dialect="postgresql"),
         CheckConstraint("parsed_character_count >= 0", name="parsed_character_count_nonnegative"),
         CheckConstraint("page_count >= 0", name="page_count_nonnegative"),
         Index(
@@ -158,7 +173,7 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     document_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    byte_size: Mapped[int] = mapped_column(nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger(), nullable=False)
     detected_mime: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False)
     parser_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -168,6 +183,7 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="document_parse_status",
             native_enum=False,
             create_constraint=True,
+            length=10,
         ),
         nullable=False,
     )
@@ -193,6 +209,49 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         passive_deletes=True,
         overlaps="organization,project,document",
     )
+
+
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_IMMUTABLE_VERSION_FIELDS = (
+    "document_id",
+    "version_number",
+    "sha256",
+    "byte_size",
+    "detected_mime",
+    "storage_key",
+)
+
+
+def _validate_sha256(value: str, field_name: str) -> None:
+    if not _SHA256_PATTERN.fullmatch(value):
+        raise ValueError(f"{field_name} must be exactly 64 lowercase hexadecimal characters")
+
+
+@event.listens_for(DocumentVersion, "before_insert")
+def _validate_document_version_insert(
+    mapper: object, connection: object, target: DocumentVersion
+) -> None:
+    del mapper, connection
+    _validate_sha256(target.sha256, "sha256")
+
+
+@event.listens_for(DocumentVersion, "before_update")
+def _protect_document_version_bytes(
+    mapper: object, connection: object, target: DocumentVersion
+) -> None:
+    del mapper, connection
+    state = inspect(target)
+    if any(state.attrs[field].history.has_changes() for field in _IMMUTABLE_VERSION_FIELDS):
+        raise ValueError("document version source bytes metadata is immutable")
+    _validate_sha256(target.sha256, "sha256")
+
+
+@event.listens_for(DocumentVersion, "before_delete")
+def _reject_document_version_delete(
+    mapper: object, connection: object, target: DocumentVersion
+) -> None:
+    del mapper, connection, target
+    raise ValueError("DocumentVersion records are retained and cannot be deleted")
 
 
 class DocumentChunk(UUIDPrimaryKeyMixin, Base):
@@ -222,7 +281,18 @@ class DocumentChunk(UUIDPrimaryKeyMixin, Base):
         UniqueConstraint(
             "document_version_id", "ordinal", name="uq_document_chunks_version_ordinal"
         ),
+        UniqueConstraint(
+            "id",
+            "document_version_id",
+            "organization_id",
+            "project_id",
+            name="uq_document_chunks_version_tenant_identity",
+        ),
         CheckConstraint("ordinal >= 0", name="ordinal_nonnegative"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_length_64"),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_lower_hex_64"
+        ).ddl_if(dialect="postgresql"),
         CheckConstraint("character_count >= 0", name="character_count_nonnegative"),
         CheckConstraint("token_count >= 0", name="token_count_nonnegative"),
         Index(
@@ -260,6 +330,14 @@ class DocumentChunk(UUIDPrimaryKeyMixin, Base):
     evidence: Mapped[list[CandidateItemEvidence]] = relationship(
         back_populates="chunk", passive_deletes=True, overlaps="organization,project,document_version,evidence,item"
     )
+
+
+@event.listens_for(DocumentChunk, "before_insert")
+def _validate_document_chunk_insert(
+    mapper: object, connection: object, target: DocumentChunk
+) -> None:
+    del mapper, connection
+    _validate_sha256(target.content_hash, "content_hash")
 
 
 @event.listens_for(DocumentChunk, "before_update")
