@@ -237,7 +237,8 @@ def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
 
     process: subprocess.Popen[bytes] | None = None
     probe_code = (
-        "import os, resource, socket\n"
+        "import os, pypdf, resource, socket\n"
+        "import rag_eval_api.parsers.runner\n"
         "if os.geteuid() != 65534 or os.getuid() != 65534: raise SystemExit(11)\n"
         "resource.setrlimit(resource.RLIMIT_CPU, (1, 1))\n"
         "resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))\n"
@@ -308,14 +309,17 @@ def _max_request_bytes(max_input_bytes: int) -> int:
 def _child_environment(temp_dir: str | None = None) -> dict[str, str]:
     """Build the parser environment without inheriting application secrets."""
 
-    package_root = str(Path(__file__).resolve().parents[2])
+    pythonpath = [str(Path(__file__).resolve().parents[2])]
+    for runtime_path in _runtime_python_paths():
+        if runtime_path.name in {"site-packages", "dist-packages"}:
+            pythonpath.append(str(runtime_path))
     return {
         "PATH": _SAFE_CHILD_PATH,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PYTHONHASHSEED": "0",
         "PYTHONIOENCODING": "utf-8",
-        "PYTHONPATH": package_root,
+        "PYTHONPATH": os.pathsep.join(pythonpath),
         "PYTHONSAFEPATH": "1",
         "PYTHONUNBUFFERED": "1",
         "TMPDIR": temp_dir or "/tmp",
@@ -339,17 +343,7 @@ def _sandbox_runtime_bind_args() -> list[str]:
     # directories. In particular, never turn a malformed runtime path into
     # ``--ro-bind / /`` or expose a virtualenv/project root wholesale.
     paths = {str(Path(sys.executable).absolute()), str(executable), str(package_root)}
-    for runtime_path in {
-        sysconfig.get_path("stdlib"),
-        sysconfig.get_path("platstdlib"),
-        sysconfig.get_path("purelib"),
-        sysconfig.get_path("platlib"),
-    }:
-        if runtime_path:
-            runtime = Path(runtime_path).resolve()
-            if runtime == Path("/"):
-                return []
-            paths.add(str(runtime))
+    paths.update(str(path) for path in _runtime_python_paths())
     arguments: list[str] = []
     created_parents: set[str] = set()
     for source in sorted(paths):
@@ -364,6 +358,26 @@ def _sandbox_runtime_bind_args() -> list[str]:
             created_parents.add(parent_string)
         arguments.extend(("--ro-bind", source, source))
     return arguments
+
+
+def _runtime_python_paths() -> set[Path]:
+    """Return exact stdlib/site-package directories safe to bind read-only."""
+
+    allowed: set[Path] = set()
+    for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+        configured = sysconfig.get_path(key)
+        if not configured:
+            continue
+        path = Path(configured).resolve()
+        if path == Path("/") or not path.is_dir():
+            return set()
+        if key in {"purelib", "platlib"}:
+            if path.name not in {"site-packages", "dist-packages"}:
+                return set()
+        elif not path.name.startswith("python"):
+            return set()
+        allowed.add(path)
+    return allowed
 
 
 @contextmanager

@@ -602,7 +602,9 @@ def test_parser_runner_uses_minimal_environment_and_private_working_directory(
     assert isinstance(child_env, dict)
     assert "DATABASE_URL" not in child_env
     assert "PROVIDER_API_KEY" not in child_env
-    assert child_env["PYTHONPATH"] == str(Path(runner_module.__file__).resolve().parents[2])
+    assert child_env["PYTHONPATH"].split(os.pathsep)[0] == str(
+        Path(runner_module.__file__).resolve().parents[2]
+    )
     assert child_env["TMPDIR"] == captured["cwd"]
     assert not Path(str(captured["cwd"])).exists()
 
