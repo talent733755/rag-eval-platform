@@ -63,10 +63,15 @@ on a hard timeout. Development may use a restricted fallback with Python-level
 socket denial, but that is not OS network isolation. Production and
 `PARSER_REQUIRE_RESOURCE_LIMITS=true` require an explicit configured sandbox
 executable/argument profile (such as approved `unshare`/`bwrap`) plus CPU and
-memory limit support; only profiles with explicit network-isolation and
-parent-death flags are accepted. The parent/child protocol is strict UTF-8 JSON,
-never pickle or another executable object format. Timeout, malformed output,
-EOF, and crash outcomes retain the public `parse_timeout` and
+memory limit support. The executable must resolve to the root-owned,
+non-group/other-writable absolute-path allowlist for supported `bwrap` and
+`unshare` binaries; symlink aliases, `/usr/bin/env`, basename matches, and
+custom launchers are rejected. Only profiles with explicit network-isolation
+and parent-death flags are accepted. Child stdout/stderr are hard-limited and
+the complete process group is killed on timeout, malformed output, EOF, crash,
+or output overflow. The parent/child protocol is strict UTF-8 JSON, never
+pickle or another executable object format. Timeout, malformed output, EOF, and
+crash outcomes retain the public `parse_timeout` and
 `parser_sandbox_unavailable` error codes. The current parser runner is not a
 worker process and does not complete upload-to-parse workflow.
 
@@ -132,7 +137,10 @@ lease intervals, and opt-in provider configuration. Secrets use `SecretStr`
 and are not included in safe configuration output. Production rejects relative
 or temporary blob roots, wildcard provider host allowlists, development actor
 configuration, non-HTTPS provider URLs, and provider configuration without
-explicit host/port allowlists.
+explicit host/port allowlists. `BLOB_ROOT` is resolved through real paths and
+rejects the filesystem root plus `/tmp`, `/var/tmp`, `/private/tmp`, and the
+platform's `tempfile.gettempdir()` tree, including symlink aliases and
+descendants.
 
 Untrusted file execution limits, parser sandboxing, MIME/signature checks,
 atomic blob writes, and redacted storage/parser observability are implemented

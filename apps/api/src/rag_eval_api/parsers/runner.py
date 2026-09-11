@@ -8,14 +8,15 @@ import dataclasses
 import json
 import math
 import os
-import shutil
 import signal
 import socket
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal, cast
+from typing import BinaryIO, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -51,6 +52,12 @@ _ERROR_CODES = frozenset(
         "parser_sandbox_unavailable",
     }
 )
+_MAX_CHILD_STDOUT_BYTES = 1 * 1024 * 1024
+_MAX_CHILD_STDERR_BYTES = 1 * 1024 * 1024
+_SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
+    "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
+    "unshare": frozenset({"/usr/bin/unshare", "/bin/unshare", "/usr/local/bin/unshare"}),
+}
 
 
 class _StrictModel(BaseModel):
@@ -141,18 +148,30 @@ def restricted_sandbox_available() -> bool:
 def sandbox_command_available(executable: str | None, args: Sequence[str]) -> bool:
     """Check a supported no-network, parent-death-aware OS sandbox profile."""
 
-    if not executable or not executable.strip():
+    if not executable or not executable.strip() or not os.path.isabs(executable):
         return False
-    resolved = shutil.which(executable)
-    if resolved is None or not os.access(resolved, os.X_OK):
-        return False
+    absolute = os.path.abspath(executable)
+    resolved = os.path.realpath(absolute)
     command_name = Path(resolved).name
-    supplied = set(args)
-    required_flags = {
-        "bwrap": {"--unshare-net", "--die-with-parent"},
-        "unshare": {"--net", "--fork", "--kill-child"},
-    }.get(command_name)
-    return required_flags is not None and required_flags <= supplied
+    if absolute != resolved or resolved not in _SANDBOX_PATHS.get(command_name, frozenset()):
+        return False
+    try:
+        stat_result = os.stat(resolved, follow_symlinks=False)
+    except OSError:
+        return False
+    if (
+        not os.path.isfile(resolved)
+        or stat_result.st_uid != 0
+        or stat_result.st_mode & 0o022
+        or not os.access(resolved, os.X_OK)
+    ):
+        return False
+    required_flags = (
+        {"--unshare-net", "--die-with-parent"}
+        if command_name == "bwrap"
+        else {"--net", "--fork", "--kill-child"}
+    )
+    return required_flags <= set(args)
 
 
 class ParserRunner:
@@ -228,23 +247,27 @@ class ParserRunner:
                 self._command(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 start_new_session=True,
             )
-            output, _ = process.communicate(
-                _json_bytes(request.model_dump(mode="json")), timeout=timeout
+            output, _ = self._communicate_bounded(
+                process, _json_bytes(request.model_dump(mode="json")), timeout
             )
-        except subprocess.TimeoutExpired as exc:
+        except ParserTimeout:
             if process is not None:
-                self._terminate(process)
-            raise ParserTimeout("parser exceeded its hard timeout") from exc
+                self._terminate(process, force_group=True)
+            raise
+        except ParserSandboxUnavailable:
+            if process is not None:
+                self._terminate(process, force_group=True)
+            raise
         except (OSError, ValueError) as exc:
             if process is not None:
-                self._terminate(process)
+                self._terminate(process, force_group=True)
             raise ParserSandboxUnavailable("parser sandbox could not be started") from exc
         finally:
             if process is not None and process.poll() is None:
-                self._terminate(process)
+                self._terminate(process, force_group=True)
 
         if process.returncode != 0:
             self._terminate(process, force_group=True)
@@ -254,6 +277,79 @@ class ParserRunner:
         except ParserError:
             self._terminate(process, force_group=True)
             raise
+
+    def _communicate_bounded(
+        self,
+        process: subprocess.Popen[bytes],
+        request: bytes,
+        timeout: float,
+    ) -> tuple[bytes, bytes]:
+        """Exchange one bounded request without unbounded pipe buffering."""
+
+        stdout_buffer = bytearray()
+        stderr_buffer = bytearray()
+        output_limit_hit = threading.Event()
+
+        def drain(stream: BinaryIO | None, buffer: bytearray, limit: int) -> None:
+            if stream is None:
+                return
+            try:
+                while True:
+                    chunk = stream.read(64 * 1024)
+                    if not chunk:
+                        return
+                    if len(buffer) + len(chunk) > limit:
+                        output_limit_hit.set()
+                        return
+                    buffer.extend(chunk)
+            except (OSError, ValueError):
+                return
+
+        def write_request(stream: BinaryIO | None) -> None:
+            if stream is None:
+                return
+            try:
+                stream.write(request)
+                stream.close()
+            except (BrokenPipeError, OSError, ValueError):
+                return
+
+        stdout_thread = threading.Thread(
+            target=drain,
+            args=(process.stdout, stdout_buffer, _MAX_CHILD_STDOUT_BYTES),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=drain,
+            args=(process.stderr, stderr_buffer, _MAX_CHILD_STDERR_BYTES),
+            daemon=True,
+        )
+        input_thread = threading.Thread(target=write_request, args=(process.stdin,), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        input_thread.start()
+        deadline = time.monotonic() + timeout
+        try:
+            while process.poll() is None or stdout_thread.is_alive() or stderr_thread.is_alive():
+                if output_limit_hit.is_set():
+                    raise ParserSandboxUnavailable("parser sandbox output exceeded the limit")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ParserTimeout("parser exceeded its hard timeout")
+                time.sleep(min(0.01, remaining))
+            process.wait(timeout=0.5)
+            if output_limit_hit.is_set():
+                raise ParserSandboxUnavailable("parser sandbox output exceeded the limit")
+            return bytes(stdout_buffer), bytes(stderr_buffer)
+        finally:
+            if process.stdin is not None:
+                try:
+                    process.stdin.close()
+                except (OSError, ValueError):
+                    pass
+            stdout_thread.join(timeout=0.5)
+            stderr_thread.join(timeout=0.5)
+            input_thread.join(timeout=0.5)
 
     def _command(self) -> list[str]:
         child = [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]

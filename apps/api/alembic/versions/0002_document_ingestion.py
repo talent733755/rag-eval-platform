@@ -834,9 +834,7 @@ def downgrade() -> None:
         "ingestion_job_leases",
     ):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_set_updated_at ON {table}")
-    op.execute(
-        "DROP TRIGGER IF EXISTS document_versions_source_bytes_guard ON document_versions"
-    )
+    op.execute("DROP TRIGGER IF EXISTS document_versions_source_bytes_guard ON document_versions")
     op.execute(
         "DROP TRIGGER IF EXISTS candidate_generation_configs_immutable_guard ON candidate_generation_configs"
     )

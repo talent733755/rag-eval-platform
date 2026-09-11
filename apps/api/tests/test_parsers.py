@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from docx import Document as DocxDocument
 
+from rag_eval_api.parsers.docx import DocxParser
 from rag_eval_api.parsers.errors import (
     MalformedDocumentError,
     ParserLimitExceeded,
@@ -19,6 +20,7 @@ from rag_eval_api.parsers.errors import (
     UnsupportedDocumentError,
 )
 from rag_eval_api.parsers.models import ParserLimits
+from rag_eval_api.parsers.pdf import PdfParser
 from rag_eval_api.parsers.registry import ParserRegistry
 from rag_eval_api.parsers.runner import (
     ParserRunner,
@@ -312,8 +314,12 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.sandbox_command_available",
+        lambda _executable, _args: True,
+    )
     pid_file = tmp_path / "sleep.pid"
     wrapper = tmp_path / "bwrap"
     wrapper.write_text(
@@ -357,8 +363,12 @@ def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
 
 @pytest.mark.parametrize("exit_code", [0, 17])
 def test_parser_runner_maps_eof_or_crashed_child_to_sandbox_error(
-    tmp_path: Path, exit_code: int
+    tmp_path: Path, exit_code: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.sandbox_command_available",
+        lambda _executable, _args: True,
+    )
     wrapper = tmp_path / "bwrap"
     _write_executable(wrapper, f"#!/bin/sh\nexit {exit_code}\n")
 
@@ -386,7 +396,13 @@ def test_parser_runner_requires_os_sandbox_for_strict_mode() -> None:
         )
 
 
-def test_parser_runner_rejects_pickle_payload_without_executing_it(tmp_path: Path) -> None:
+def test_parser_runner_rejects_pickle_payload_without_executing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.sandbox_command_available",
+        lambda _executable, _args: True,
+    )
     marker = tmp_path / "executed"
 
     class MaliciousPayload:
@@ -421,8 +437,64 @@ def test_parser_runner_rejects_sandbox_commands_without_required_flags(tmp_path:
     bwrap.write_text("#!/bin/sh\nexit 0\n")
     bwrap.chmod(0o700)
     assert not sandbox_command_available(str(bwrap), ("--die-with-parent",))
-    assert sandbox_command_available(str(bwrap), ("--die-with-parent", "--unshare-net"))
+    assert not sandbox_command_available(str(bwrap), ("--die-with-parent", "--unshare-net"))
     env = tmp_path / "env"
     env.write_text("#!/bin/sh\nexit 0\n")
     env.chmod(0o700)
     assert not sandbox_command_available(str(env), ("--unshare-net", "--die-with-parent"))
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_parser_runner_caps_child_output_and_kills_process_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: str
+) -> None:
+    monkeypatch.setattr(
+        "rag_eval_api.parsers.runner.sandbox_command_available",
+        lambda _executable, _args: True,
+    )
+    wrapper = tmp_path / "bwrap"
+    wrapper.write_text(
+        "#!" + sys.executable + "\n"
+        "import sys\n"
+        f"sys.{stream}.write('x' * (2 * 1024 * 1024))\n"
+        f"sys.{stream}.flush()\n"
+    )
+    wrapper.chmod(0o700)
+
+    with pytest.raises(ParserSandboxUnavailable, match="output"):
+        ParserRunner(
+            sandbox_executable=str(wrapper),
+            sandbox_args=("--die-with-parent", "--unshare-net"),
+        ).parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="output-limit.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
+        )
+
+
+def test_pdf_and_docx_parser_timeout_is_not_downgraded_to_parse_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf_clock = iter((0.0, 2.0))
+    monkeypatch.setattr("rag_eval_api.parsers.pdf.time.monotonic", lambda: next(pdf_clock))
+    with pytest.raises(ParserTimeout) as pdf_error:
+        PdfParser().parse(
+            _pdf_bytes(),
+            filename="timeout.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(max_pdf_wall_clock_seconds=1),
+        )
+    assert pdf_error.value.code == "parse_timeout"
+
+    docx_clock = iter((0.0, 2.0))
+    monkeypatch.setattr("rag_eval_api.parsers.docx.time.monotonic", lambda: next(docx_clock))
+    with pytest.raises(ParserTimeout) as docx_error:
+        DocxParser().parse(
+            _docx_bytes(),
+            filename="timeout.docx",
+            declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            limits=ParserLimits(max_pdf_wall_clock_seconds=1),
+        )
+    assert docx_error.value.code == "parse_timeout"

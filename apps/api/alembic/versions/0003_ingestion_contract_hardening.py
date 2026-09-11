@@ -15,10 +15,7 @@ def upgrade() -> None:
     # runtime value ``processing`` fail with a length error before the final
     # status CHECK could reject it. Ten characters matches the job status
     # envelope while the CHECK remains terminal-only.
-    op.execute(
-        "ALTER TABLE ingestion_job_attempts "
-        "ALTER COLUMN final_status TYPE VARCHAR(10)"
-    )
+    op.execute("ALTER TABLE ingestion_job_attempts ALTER COLUMN final_status TYPE VARCHAR(10)")
 
     op.create_unique_constraint(
         "uq_candidate_generation_configs_dataset_tenant_identity",
@@ -82,7 +79,4 @@ def downgrade() -> None:
         "candidate_generation_configs",
         type_="unique",
     )
-    op.execute(
-        "ALTER TABLE ingestion_job_attempts "
-        "ALTER COLUMN final_status TYPE VARCHAR(9)"
-    )
+    op.execute("ALTER TABLE ingestion_job_attempts ALTER COLUMN final_status TYPE VARCHAR(9)")

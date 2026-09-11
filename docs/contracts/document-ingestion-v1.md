@@ -110,7 +110,11 @@ an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
 non-root, no-network, CPU, and memory limits. Only supported `bwrap` profiles
 with `--unshare-net` and `--die-with-parent`, or supported `unshare` profiles
 with `--net`, `--fork`, and `--kill-child`, are accepted; `/usr/bin/env` and
-other command wrappers are not sandboxes. If those capabilities are
+other command wrappers are not sandboxes. The executable must be an absolute
+real path in the root-owned, non-group/other-writable allowlist; basename
+matches and symlink aliases are rejected. Child stdout and stderr are each
+hard-limited; overflow maps to `parser_sandbox_unavailable` after the complete
+process group is terminated. If those capabilities are
 unavailable, settings fail closed. The child protocol is strict UTF-8 JSON with
 an `{"kind":"ok","result":...}` or
 `{"kind":"error","code":...,"message":...}` envelope. The parent never

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -385,12 +386,14 @@ class Settings(BaseSettings):
         blob_raw = os.fspath(self.blob_root)
         blob_path = Path(os.path.normpath(os.sep + blob_raw.lstrip(os.sep)))
         resolved_blob_path = Path(os.path.realpath(blob_path))
-        temporary_roots = (
+        temporary_roots = {
             Path("/tmp"),
             Path("/var/tmp"),
             Path("/private/tmp"),
             Path("/private/var/tmp"),
-        )
+            Path(os.path.realpath(tempfile.gettempdir())),
+        }
+        temporary_roots = {Path(os.path.realpath(root)) for root in temporary_roots}
 
         def is_under(path: Path, root: Path) -> bool:
             try:

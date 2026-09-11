@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 import pytest
 from pydantic import SecretStr
 
@@ -28,11 +31,28 @@ def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist(
 
 @pytest.mark.parametrize(
     "root",
-    ["/", "//", "////", "/./", "/tmp/..", "/private/tmp", "/private/tmp/rag-eval"],
+    [
+        "/",
+        "//",
+        "////",
+        "/./",
+        "/tmp/..",
+        "/private/tmp",
+        "/private/tmp/rag-eval",
+        str(Path(tempfile.gettempdir()) / "rag-eval-blobs"),
+    ],
 )
 def test_settings_rejects_all_system_root_aliases(root: str) -> None:
     with pytest.raises(ValueError, match="BLOB_ROOT"):
         Settings(_env_file=None, blob_root=root)
+
+
+def test_settings_rejects_symlink_resolving_into_os_temp_directory(tmp_path: Path) -> None:
+    temp_link = tmp_path / "temp-link"
+    temp_link.symlink_to(Path(tempfile.gettempdir()), target_is_directory=True)
+
+    with pytest.raises(ValueError, match="BLOB_ROOT"):
+        Settings(_env_file=None, blob_root=str(temp_link / "nested"))
 
 
 def test_provider_credentials_are_not_part_of_safe_configuration_dump() -> None:

@@ -52,6 +52,8 @@ class PdfParser:
             )
         except ParserLimitExceeded:
             raise
+        except ParserTimeout:
+            raise
         except Exception as exc:
             raise MalformedDocumentError("PDF could not be parsed safely") from exc
 

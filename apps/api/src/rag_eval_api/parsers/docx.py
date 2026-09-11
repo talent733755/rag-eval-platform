@@ -97,7 +97,7 @@ class DocxParser:
                             raise
                         except (ET.ParseError, ValueError) as exc:
                             raise MalformedDocumentError("DOCX XML is malformed") from exc
-        except (ParserLimitExceeded, ParserSecurityError, MalformedDocumentError):
+        except (ParserLimitExceeded, ParserSecurityError, MalformedDocumentError, ParserTimeout):
             raise
         except (zipfile.BadZipFile, OSError, ValueError) as exc:
             raise MalformedDocumentError("DOCX ZIP is malformed") from exc
