@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -263,7 +264,7 @@ def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
                 *args,
                 *_sandbox_runtime_bind_args(),
                 "--",
-                sys.executable,
+                str(Path(sys.executable).resolve()),
                 "-c",
                 probe_code % sentinel,
             ]
@@ -489,7 +490,10 @@ def _is_secure_runtime_path(
             )
         except OSError:
             return False
-        if stat_result.st_uid != owner_uid or stat_result.st_mode & 0o022:
+        final_symlink = (
+            current == path and allow_final_symlink and stat.S_ISLNK(stat_result.st_mode)
+        )
+        if stat_result.st_uid != owner_uid or (not final_symlink and stat_result.st_mode & 0o022):
             return False
         if current == root:
             return True
@@ -754,7 +758,10 @@ class ParserRunner:
             input_thread.join(timeout=0.5)
 
     def _command(self) -> list[str]:
-        child = [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
+        interpreter = (
+            str(Path(sys.executable).resolve()) if self.uses_os_sandbox else sys.executable
+        )
+        child = [interpreter, "-m", "rag_eval_api.parsers.runner", "--child"]
         if self.uses_os_sandbox:
             child.append("--strict")
         if self.sandbox_executable is None:
@@ -1055,5 +1062,5 @@ def _error_from_child(code: str, message: str) -> ParserError:
     return error_type(message)
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--child"]:
+if __name__ == "__main__" and sys.argv[1:] in (["--child"], ["--child", "--strict"]):
     _child_main()

@@ -43,6 +43,9 @@ jobs:
       - name: Verify real parser sandbox capability
         run: uv run --directory apps/api pytest tests/test_parsers.py -k real_bwrap_profile -q
 
+      - name: Verify real strict parser execution
+        run: uv run --directory apps/api pytest tests/test_parsers.py -k real_bwrap_strict_parser_child_executes -q
+
       - name: Run API lint
         run: uv run --directory apps/api ruff check .
 

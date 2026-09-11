@@ -6,6 +6,7 @@ import io
 import os
 import pickle
 import stat
+import subprocess
 import sys
 import time
 import zipfile
@@ -539,7 +540,7 @@ def test_parser_runner_places_parser_argv_after_sandbox_separator(
         "--",
     ]
     assert command[5:] == [
-        sys.executable,
+        str(Path(sys.executable).resolve()),
         "-m",
         "rag_eval_api.parsers.runner",
         "--child",
@@ -625,6 +626,35 @@ def test_runtime_python_paths_reject_untrusted_sysconfig_locations(
     assert runner_module._runtime_python_paths() == set()
 
 
+def test_strict_child_entrypoint_returns_protocol_envelope() -> None:
+    request = runner_module._RequestEnvelope(
+        data_b64=base64.b64encode(_pdf_bytes()).decode("ascii"),
+        suffix=".pdf",
+        filename="strict.pdf",
+        declared_mime="application/pdf",
+        limits=runner_module._LimitsEnvelope(**dataclasses.asdict(ParserLimits())),
+        timeout_seconds=5.0,
+        sandbox_enabled=True,
+        max_output_bytes=runner_module.DEFAULT_MAX_PARSER_OUTPUT_BYTES,
+    )
+    completed = subprocess.run(
+        [
+            str(Path(sys.executable).resolve()),
+            "-m",
+            "rag_eval_api.parsers.runner",
+            "--child",
+            "--strict",
+        ],
+        input=runner_module._json_bytes(request.model_dump(mode="json")),
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        timeout=10.0,
+    )
+    assert completed.returncode == 0
+    assert runner_module._strict_json_loads(completed.stdout)["kind"] in {"ok", "error"}
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or not Path("/usr/bin/bwrap").is_file(),
     reason="Linux bubblewrap is required for the real sandbox capability check",
@@ -635,6 +665,26 @@ def test_real_bwrap_profile_passes_capability_probe() -> None:
     assert runner_module.sandbox_command_available(
         "/usr/bin/bwrap", runner_module._SANDBOX_TEMPLATES["bwrap"]
     )
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/usr/bin/bwrap").is_file(),
+    reason="Linux bubblewrap is required for the real strict parser check",
+)
+def test_real_bwrap_strict_parser_child_executes() -> None:
+    if os.geteuid() == 0:
+        pytest.skip("the real profile must be exercised by a non-root process")
+    result = ParserRunner(
+        sandbox_executable="/usr/bin/bwrap",
+        sandbox_args=runner_module._SANDBOX_TEMPLATES["bwrap"],
+    ).parse_bytes(
+        _pdf_bytes(),
+        suffix=".pdf",
+        filename="strict.pdf",
+        declared_mime="application/pdf",
+        limits=ParserLimits(),
+    )
+    assert result.page_count == 1
 
 
 def test_child_main_applies_fixed_limits_before_reading_protocol(
