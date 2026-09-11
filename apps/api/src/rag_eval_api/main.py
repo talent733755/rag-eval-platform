@@ -28,6 +28,7 @@ from rag_eval_api.db import (
     get_db_session,
     get_redis_client,
 )
+from rag_eval_api.routes.documents import router as documents_router
 from rag_eval_api.routes.projects import router as projects_router
 
 HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
@@ -196,6 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     application.include_router(projects_router)
+    application.include_router(documents_router)
 
     @application.get("/health/live", response_model=None)
     async def liveness() -> dict[str, str]:
