@@ -608,8 +608,20 @@ def test_parser_runner_uses_minimal_environment_and_private_working_directory(
 
 
 def test_sandbox_runtime_binds_reject_broad_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runner_module.sys, "prefix", "/")
+    monkeypatch.setattr(runner_module.sys, "executable", "/")
     assert runner_module._sandbox_runtime_bind_args() == []
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/usr/bin/bwrap").is_file(),
+    reason="Linux bubblewrap is required for the real sandbox capability check",
+)
+def test_real_bwrap_profile_passes_capability_probe() -> None:
+    if os.geteuid() == 0:
+        pytest.skip("the real profile must be exercised by a non-root process")
+    assert runner_module.sandbox_command_available(
+        "/usr/bin/bwrap", runner_module._SANDBOX_TEMPLATES["bwrap"]
+    )
 
 
 def test_child_main_applies_fixed_limits_before_reading_protocol(

@@ -37,6 +37,12 @@ jobs:
       - name: Install API dependencies
         run: uv sync --directory apps/api --locked
 
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y bubblewrap
+
+      - name: Verify real parser sandbox capability
+        run: uv run --directory apps/api pytest tests/test_parsers.py -k real_bwrap_profile -q
+
       - name: Run API lint
         run: uv run --directory apps/api ruff check .
 

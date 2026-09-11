@@ -12,6 +12,7 @@ import signal
 import socket
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -325,26 +326,30 @@ def _sandbox_runtime_bind_args() -> list[str]:
     """Bind only the interpreter and parser code into bwrap's tmpfs root."""
 
     executable = Path(sys.executable).resolve()
-    prefix = Path(sys.prefix).resolve()
     package_root = Path(__file__).resolve().parents[2]
-    if any(path == Path("/") for path in (executable, prefix, package_root)):
+    if any(path == Path("/") for path in (executable, package_root)):
         return []
     if not (
         executable.is_file()
-        and _is_safe_runtime_prefix(prefix)
         and package_root.name == "src"
         and (package_root / "rag_eval_api").is_dir()
     ):
         return []
-    # Only bind the interpreter, its virtualenv, and the package source. In
-    # particular, never turn a malformed runtime path into ``--ro-bind / /``
-    # or expose a home/temp/project root directory wholesale.
-    paths = {
-        str(Path(sys.executable).absolute()),
-        str(executable),
-        str(prefix),
-        str(package_root),
-    }
+    # Bind only exact interpreter, standard-library, dependency and package
+    # directories. In particular, never turn a malformed runtime path into
+    # ``--ro-bind / /`` or expose a virtualenv/project root wholesale.
+    paths = {str(Path(sys.executable).absolute()), str(executable), str(package_root)}
+    for runtime_path in {
+        sysconfig.get_path("stdlib"),
+        sysconfig.get_path("platstdlib"),
+        sysconfig.get_path("purelib"),
+        sysconfig.get_path("platlib"),
+    }:
+        if runtime_path:
+            runtime = Path(runtime_path).resolve()
+            if runtime == Path("/"):
+                return []
+            paths.add(str(runtime))
     arguments: list[str] = []
     created_parents: set[str] = set()
     for source in sorted(paths):
@@ -359,21 +364,6 @@ def _sandbox_runtime_bind_args() -> list[str]:
             created_parents.add(parent_string)
         arguments.extend(("--ro-bind", source, source))
     return arguments
-
-
-def _is_safe_runtime_prefix(prefix: Path) -> bool:
-    """Accept only a Python prefix, never a broad host directory."""
-
-    if prefix in {
-        Path("/"),
-        Path("/Users"),
-        Path("/home"),
-        Path("/root"),
-        Path("/tmp"),
-        Path("/var/tmp"),
-    }:
-        return False
-    return prefix in {Path("/usr"), Path("/usr/local")} or (prefix / "pyvenv.cfg").is_file()
 
 
 @contextmanager
@@ -512,7 +502,7 @@ class ParserRunner:
                     stderr=subprocess.PIPE,
                     start_new_session=True,
                     cwd=cwd,
-                    env=_child_environment(cwd),
+                    env=_child_environment("/tmp" if self.uses_os_sandbox else cwd),
                 )
                 output, _ = self._communicate_bounded(
                     process,
