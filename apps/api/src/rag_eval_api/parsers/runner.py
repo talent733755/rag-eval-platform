@@ -8,6 +8,7 @@ import dataclasses
 import json
 import math
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -66,6 +67,7 @@ _MAX_CHILD_STDERR_BYTES = 64 * 1024
 _STARTUP_CPU_SECONDS = 302
 _STARTUP_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 _SAFE_CHILD_PATH = "/usr/local/bin:/usr/bin:/bin"
+_PYTHON_LIBRARY_NAME = f"python{sys.version_info.major}.{sys.version_info.minor}"
 _SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
     "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
     # ``unshare`` cannot provide the required filesystem allowlist here, so it
@@ -334,25 +336,30 @@ def _sandbox_runtime_bind_args() -> list[str]:
     package_root = Path(__file__).resolve().parents[2]
     repository_root = _repository_root(package_root)
     base_prefix = Path(getattr(sys, "base_prefix", sys.prefix)).resolve()
-    expected_venv_bin = (
-        repository_root / "apps" / "api" / ".venv" / "bin"
-        if repository_root is not None
-        else Path("/")
+    prefix = Path(sys.prefix).resolve()
+    venv_root = (
+        repository_root / "apps" / "api" / ".venv" if repository_root is not None else Path("/")
     )
-    if any(path == Path("/") for path in (executable, package_root)):
+    if any(path == Path("/") for path in (executable, package_root, base_prefix, prefix)):
         return []
+    interpreter_root = base_prefix if executable.is_relative_to(base_prefix / "bin") else None
     if not (
         executable.is_file()
         and original_executable.exists()
         and original_executable.parent.name == "bin"
-        and (
-            original_executable.is_relative_to(expected_venv_bin)
-            or original_executable.is_relative_to(base_prefix / "bin")
-        )
-        and _is_safe_runtime_entry(executable)
         and repository_root is not None
         and package_root == repository_root / "apps" / "api" / "src"
         and (package_root / "rag_eval_api").is_dir()
+        and prefix == venv_root
+        and interpreter_root is not None
+        and _is_trusted_base_prefix(interpreter_root)
+        and (
+            _is_secure_runtime_path(
+                original_executable, venv_root, os.getuid(), allow_final_symlink=True
+            )
+            or _is_secure_runtime_path(original_executable, interpreter_root, 0)
+        )
+        and _is_safe_runtime_entry(executable, interpreter_root)
     ):
         return []
     # Bind only exact interpreter, standard-library, dependency and package
@@ -400,20 +407,22 @@ def _runtime_python_paths() -> set[Path]:
         if key in {"purelib", "platlib"}:
             if path.name not in {"site-packages", "dist-packages"}:
                 return set()
-            if not path.is_relative_to(venv_root / "lib"):
+            if not _is_exact_site_packages(path, venv_root / "lib"):
                 return set()
-        elif not path.name.startswith("python"):
+        elif path.name != _PYTHON_LIBRARY_NAME:
             return set()
         elif not (
-            path.is_relative_to(venv_root / "lib")
-            or (base_root_allowed and path.is_relative_to(base_prefix / "lib"))
+            _is_exact_python_library(path, venv_root / "lib")
+            or (base_root_allowed and _is_exact_python_library(path, base_prefix / "lib"))
         ):
             return set()
-        try:
-            stat_result = path.stat()
-        except OSError:
-            return set()
-        if stat_result.st_mode & 0o022:
+        if path.is_relative_to(venv_root / "lib"):
+            owner_uid = os.getuid()
+            owner_root = venv_root
+        else:
+            owner_uid = 0
+            owner_root = base_prefix
+        if not _is_secure_runtime_path(path, owner_root, owner_uid):
             return set()
         allowed.add(path)
     return allowed
@@ -429,25 +438,76 @@ def _repository_root(package_root: Path) -> Path | None:
 
 
 def _is_trusted_base_prefix(prefix: Path) -> bool:
-    """Allow only known Python installation roots for dynamic read-only binds."""
+    """Allow only explicit, root-owned Python installation instances."""
 
-    trusted_roots = (
-        Path("/usr"),
-        Path("/usr/local"),
-        Path.home() / ".local" / "share" / "uv" / "python",
-        Path("/opt/hostedtoolcache") / "Python",
+    if prefix in {Path("/usr"), Path("/usr/local")}:
+        return _is_secure_runtime_path(prefix, prefix, 0)
+    hosted_root = Path("/opt/hostedtoolcache") / "Python"
+    if not prefix.is_relative_to(hosted_root):
+        return False
+    relative = prefix.relative_to(hosted_root)
+    if len(relative.parts) != 2 or not re.fullmatch(r"3\.\d+(?:\.\d+)?", relative.parts[0]):
+        return False
+    if relative.parts[1] not in {"x64", "arm64"}:
+        return False
+    return _is_secure_runtime_path(prefix, hosted_root, 0)
+
+
+def _is_exact_python_library(path: Path, library_root: Path) -> bool:
+    """Accept only the current interpreter's direct library directory."""
+
+    return path.name == _PYTHON_LIBRARY_NAME and path.parent == library_root and path.is_dir()
+
+
+def _is_exact_site_packages(path: Path, library_root: Path) -> bool:
+    """Accept only the direct dependency directory for this interpreter."""
+
+    return (
+        path.name in {"site-packages", "dist-packages"}
+        and path.parent.name == _PYTHON_LIBRARY_NAME
+        and path.parent.parent == library_root
+        and path.is_dir()
     )
-    return any(prefix == root or prefix.is_relative_to(root) for root in trusted_roots)
 
 
-def _is_safe_runtime_entry(path: Path) -> bool:
-    """Reject writable or non-regular interpreter files before binding."""
+def _is_secure_runtime_path(
+    path: Path,
+    root: Path,
+    owner_uid: int,
+    *,
+    allow_final_symlink: bool = False,
+) -> bool:
+    """Validate every existing component of a trusted runtime path."""
+
+    if not path.is_absolute() or not path.is_relative_to(root):
+        return False
+    current = path
+    while True:
+        try:
+            stat_result = (
+                current.lstat() if current == path and allow_final_symlink else current.stat()
+            )
+        except OSError:
+            return False
+        if stat_result.st_uid != owner_uid or stat_result.st_mode & 0o022:
+            return False
+        if current == root:
+            return True
+        current = current.parent
+
+
+def _is_safe_runtime_entry(path: Path, trusted_root: Path) -> bool:
+    """Reject writable, non-regular, or out-of-root interpreter files."""
 
     try:
         stat_result = path.stat()
     except OSError:
         return False
-    return path.is_file() and not stat_result.st_mode & 0o022
+    return (
+        path.is_file()
+        and _is_secure_runtime_path(path, trusted_root, 0)
+        and not stat_result.st_mode & 0o022
+    )
 
 
 @contextmanager

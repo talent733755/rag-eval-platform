@@ -614,6 +614,17 @@ def test_sandbox_runtime_binds_reject_broad_prefixes(monkeypatch: pytest.MonkeyP
     assert runner_module._sandbox_runtime_bind_args() == []
 
 
+def test_runtime_python_paths_reject_untrusted_sysconfig_locations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runner_module.sysconfig,
+        "get_path",
+        lambda _key: "/tmp/python-runtime/site-packages",
+    )
+    assert runner_module._runtime_python_paths() == set()
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or not Path("/usr/bin/bwrap").is_file(),
     reason="Linux bubblewrap is required for the real sandbox capability check",

@@ -71,7 +71,11 @@ ordered: `bwrap --unshare-user --uid 65534 --gid 65534 --unshare-net
 --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64
 /lib64 --ro-bind /etc /etc --proc /proc --dev /dev --tmpfs /tmp --chdir /tmp
 -- <parser argv>`. The runner appends read-only binds for the interpreter and
-package, then probes identity, network, resource, and host-filesystem
+package. Runtime binds are restricted to the repository's `apps/api/.venv`
+plus an exact root-owned system Python instance (`/usr`, `/usr/local`, or
+`/opt/hostedtoolcache/Python/<version>/<arch>`); resolved paths, owners, and
+permissions are validated. User-local Python roots and broad prefixes are
+rejected. The runner then probes identity, network, resource, and host-filesystem
 sentinels before accepting the profile; parser argv cannot be inserted before
 the separator. Child stdout/stderr are hard-limited and the complete process
 group is killed on timeout, malformed output, EOF, crash, or output overflow.

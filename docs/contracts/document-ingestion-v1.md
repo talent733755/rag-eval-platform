@@ -120,6 +120,12 @@ before the separator are rejected. The executable must be an absolute real
 path in the root-owned, non-group/other-writable allowlist; basename matches
 and symlink aliases are rejected, and the exact template is probed against
 identity, network, resource, and host-filesystem sentinels before use. Child
+runtime binds are independently restricted to the checked-out repository's
+`apps/api/.venv` and an exact root-owned system Python instance (`/usr`,
+`/usr/local`, or the CI toolcache layout `/opt/hostedtoolcache/Python/<version>/<arch>`).
+Resolved interpreter and library paths, directory names, owners, and
+permissions are validated; user-local Python installations and broad prefixes
+are rejected. Child
 stdout and stderr are each hard-limited; overflow
 maps to `parser_sandbox_unavailable` after the complete process group is
 terminated. If those capabilities are
