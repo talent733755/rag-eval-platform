@@ -626,6 +626,13 @@ def test_runtime_python_paths_reject_untrusted_sysconfig_locations(
     assert runner_module._runtime_python_paths() == set()
 
 
+def test_sandbox_runtime_bind_args_fail_closed_without_runtime_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_runtime_python_paths", lambda: set())
+    assert runner_module._sandbox_runtime_bind_args() == []
+
+
 def test_strict_child_entrypoint_returns_protocol_envelope() -> None:
     request = runner_module._RequestEnvelope(
         data_b64=base64.b64encode(_pdf_bytes()).decode("ascii"),

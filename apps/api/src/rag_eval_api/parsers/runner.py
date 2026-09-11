@@ -366,8 +366,11 @@ def _sandbox_runtime_bind_args() -> list[str]:
     # Bind only exact interpreter, standard-library, dependency and package
     # directories. In particular, never turn a malformed runtime path into
     # ``--ro-bind / /`` or expose a virtualenv/project root wholesale.
-    paths = {str(original_executable), str(executable), str(package_root)}
-    paths.update(str(path) for path in _runtime_python_paths())
+    runtime_paths = _runtime_python_paths()
+    if not runtime_paths:
+        return []
+    paths = {str(executable), str(package_root)}
+    paths.update(str(path) for path in runtime_paths)
     arguments: list[str] = []
     created_parents: set[str] = set()
     for source in sorted(paths):
