@@ -53,7 +53,11 @@ _ERROR_CODES = frozenset(
     }
 )
 _MIN_CHILD_OUTPUT_BYTES = 1 * 1024 * 1024
+DEFAULT_MAX_PARSER_OUTPUT_BYTES = 64 * 1024 * 1024
+MAX_MAX_PARSER_OUTPUT_BYTES = 256 * 1024 * 1024
 _OUTPUT_ENVELOPE_BYTES = 64 * 1024
+_MAX_CHILD_REQUEST_BYTES = 768 * 1024 * 1024
+_REQUEST_METADATA_BYTES = 64 * 1024
 _SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
     "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
     "unshare": frozenset({"/usr/bin/unshare", "/bin/unshare", "/usr/local/bin/unshare"}),
@@ -96,10 +100,10 @@ class _LimitsEnvelope(_StrictModel):
 
 
 class _RequestEnvelope(_StrictModel):
-    data_b64: str
+    data_b64: str = Field(max_length=_MAX_CHILD_REQUEST_BYTES)
     suffix: Literal[".pdf", ".docx"]
-    filename: str
-    declared_mime: str | None
+    filename: str = Field(max_length=1024)
+    declared_mime: str | None = Field(default=None, max_length=255)
     limits: _LimitsEnvelope
     timeout_seconds: float
     sandbox_enabled: bool
@@ -209,11 +213,46 @@ def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
             _kill_process_group(process)
 
 
-def _child_output_limit(limits: ParserLimits) -> int:
-    return max(
-        _MIN_CHILD_OUTPUT_BYTES,
-        limits.max_normalized_characters * 4 + _OUTPUT_ENVELOPE_BYTES,
-    )
+def _child_output_limit(max_output_bytes: int) -> int:
+    """Return the explicit serialized child-output budget.
+
+    The budget is configured independently from normalized text limits because
+    JSON metadata and many small chunks can be substantially larger than the
+    normalized character count. It is still bounded to prevent a configuration
+    mistake from becoming an unbounded pipe buffer.
+    """
+
+    if not isinstance(max_output_bytes, int) or isinstance(max_output_bytes, bool):
+        raise ValueError("max_output_bytes must be an integer")
+    if not _MIN_CHILD_OUTPUT_BYTES <= max_output_bytes <= MAX_MAX_PARSER_OUTPUT_BYTES:
+        raise ValueError("max_output_bytes is outside the supported parser output budget")
+    return max_output_bytes
+
+
+def _max_request_bytes(max_input_bytes: int) -> int:
+    """Return the JSON wire budget for a base64-encoded parser request."""
+
+    encoded_input_bytes = ((max_input_bytes + 2) // 3) * 4
+    return encoded_input_bytes + _REQUEST_METADATA_BYTES
+
+
+def _read_bounded(stream: BinaryIO, *, max_bytes: int) -> bytes:
+    """Read at most ``max_bytes`` plus one byte from an untrusted pipe."""
+
+    if max_bytes < 1:
+        raise ValueError("max_bytes must be positive")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = stream.read(min(64 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            return b"".join(chunks)
+        if not isinstance(chunk, bytes):
+            raise TypeError("parser protocol stream must return bytes")
+        total += len(chunk)
+        if total > max_bytes:
+            raise ParserLimitExceeded("parser request exceeds the protocol size limit")
+        chunks.append(chunk)
 
 
 def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -244,6 +283,7 @@ class ParserRunner:
         self,
         *,
         default_timeout_seconds: float = 10.0,
+        max_output_bytes: int = DEFAULT_MAX_PARSER_OUTPUT_BYTES,
         require_resource_limits: bool = False,
         sandbox_executable: str | None = None,
         sandbox_args: Sequence[str] = (),
@@ -253,6 +293,7 @@ class ParserRunner:
         if sandbox_executable is not None and not sandbox_executable.strip():
             raise ValueError("sandbox_executable must not be empty")
         self.default_timeout_seconds = default_timeout_seconds
+        self.max_output_bytes = _child_output_limit(max_output_bytes)
         self.require_resource_limits = require_resource_limits
         self.sandbox_executable = sandbox_executable
         self.sandbox_args = tuple(sandbox_args)
@@ -299,6 +340,11 @@ class ParserRunner:
             timeout_seconds=float(timeout),
             sandbox_enabled=self.uses_os_sandbox,
         )
+        request_bytes = _json_bytes(request.model_dump(mode="json"))
+        if len(request_bytes) > _MAX_CHILD_REQUEST_BYTES or len(request_bytes) > _max_request_bytes(
+            limits.max_input_bytes
+        ):
+            raise ParserLimitExceeded("parser request exceeds the configured input budget")
         process: subprocess.Popen[bytes] | None = None
         try:
             process = subprocess.Popen(
@@ -310,9 +356,9 @@ class ParserRunner:
             )
             output, _ = self._communicate_bounded(
                 process,
-                _json_bytes(request.model_dump(mode="json")),
+                request_bytes,
                 timeout,
-                _child_output_limit(limits),
+                self.max_output_bytes,
             )
         except ParserTimeout:
             if process is not None:
@@ -447,11 +493,16 @@ class ParserRunner:
 
 def _child_result(request: _RequestEnvelope) -> _OkEnvelope | _ErrorEnvelope:
     try:
-        data = base64.b64decode(request.data_b64, validate=True)
         limits = ParserLimits(**request.limits.model_dump())
         _configure_child_sandbox(
             limits, request.timeout_seconds, sandbox_enabled=request.sandbox_enabled
         )
+        max_encoded_bytes = ((limits.max_input_bytes + 2) // 3) * 4
+        if len(request.data_b64) > max_encoded_bytes:
+            return _error_envelope("size_exceeded", "parser request input exceeds its byte limit")
+        data = base64.b64decode(request.data_b64, validate=True)
+        if len(data) > limits.max_input_bytes:
+            return _error_envelope("size_exceeded", "parser request input exceeds its byte limit")
         parser_class = {".pdf": PdfParser, ".docx": DocxParser}[request.suffix]
         parser: DocumentParser = cast(DocumentParser, parser_class())
         result = parser.parse(
@@ -524,8 +575,11 @@ def _disable_network_fallback() -> None:
 
 def _child_main() -> None:
     try:
-        request = _RequestEnvelope.model_validate(_strict_json_loads(sys.stdin.buffer.read()))
+        request_bytes = _read_bounded(sys.stdin.buffer, max_bytes=_MAX_CHILD_REQUEST_BYTES)
+        request = _RequestEnvelope.model_validate(_strict_json_loads(request_bytes))
         envelope = _child_result(request)
+    except ParserLimitExceeded as exc:
+        envelope = _error_envelope(exc.code, str(exc))
     except BaseException:
         envelope = _error_envelope(
             "parser_sandbox_unavailable", "parser sandbox returned an invalid request"

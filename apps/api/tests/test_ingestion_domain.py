@@ -59,6 +59,12 @@ def test_idempotency_replay_is_allowed_but_fingerprint_conflict_is_rejected() ->
         "idempotency_conflict",
         "parse_timeout",
         "parser_sandbox_unavailable",
+        "security_violation",
+        "blob_already_exists",
+        "blob_security_error",
+        "invalid_storage_key",
+        "blob_not_found",
+        "blob_store_error",
     } <= INGESTION_ERROR_CODES
 
 

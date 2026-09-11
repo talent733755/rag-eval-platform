@@ -15,6 +15,14 @@ def test_document_ingestion_defaults_are_safe_and_provider_is_opt_in() -> None:
     assert settings.provider_api_key is None
     assert settings.worker_lease_ttl_seconds == 60
     assert settings.parser_limits().max_docx_compression_ratio == 100
+    assert settings.max_parser_output_bytes == 64 * 1024 * 1024
+    assert settings.parser_runner().max_output_bytes == 64 * 1024 * 1024
+
+
+@pytest.mark.parametrize("value", [1024 * 1024 - 1, 1024 * 1024 * 1024 + 1])
+def test_parser_output_budget_has_explicit_finite_bounds(value: int) -> None:
+    with pytest.raises(ValueError, match="max_parser_output_bytes"):
+        Settings(_env_file=None, max_parser_output_bytes=value)
 
 
 def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist() -> None:

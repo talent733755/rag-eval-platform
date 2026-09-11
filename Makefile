@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+.ONESHELL:
 
 .PHONY: install lint typecheck test test-integration build infra-up infra-down
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import io
 import os
 import pickle
@@ -21,7 +22,7 @@ from rag_eval_api.parsers.errors import (
     ParserSecurityError,
     UnsupportedDocumentError,
 )
-from rag_eval_api.parsers.models import ParserLimits
+from rag_eval_api.parsers.models import CanonicalChunk, ParseResult, ParserLimits
 from rag_eval_api.parsers.pdf import PdfParser
 from rag_eval_api.parsers.registry import ParserRegistry
 from rag_eval_api.parsers.runner import (
@@ -165,6 +166,8 @@ def test_registry_rejects_limits_and_zip_traversal(tmp_path: Path) -> None:
             filename="guide.docx",
             declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+    assert ParserSecurityError.code == "security_violation"
 
 
 def test_registry_treats_filename_as_metadata_only() -> None:
@@ -525,15 +528,55 @@ def test_parser_runner_places_parser_argv_after_sandbox_separator(
     assert command[5:] == [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
 
 
-def test_parser_runner_output_limit_scales_with_normalized_character_limit() -> None:
-    assert (
-        runner_module._child_output_limit(ParserLimits(max_normalized_characters=1))
-        == 1 * 1024 * 1024
+def test_parser_runner_output_limit_is_the_explicit_serialized_budget() -> None:
+    assert runner_module._child_output_limit(1 * 1024 * 1024) == 1 * 1024 * 1024
+    assert runner_module._child_output_limit(64 * 1024 * 1024) == 64 * 1024 * 1024
+
+
+@pytest.mark.parametrize("value", [0, 1024 * 1024 - 1, 256 * 1024 * 1024 + 1, True])
+def test_parser_runner_output_budget_is_explicit_and_bounded(value: object) -> None:
+    with pytest.raises(ValueError, match="output"):
+        runner_module._child_output_limit(value)  # type: ignore[arg-type]
+
+
+def test_default_parser_output_budget_allows_5000_legal_chunks() -> None:
+    result = ParseResult(
+        parser_version="test-v1",
+        content_hash="0" * 64,
+        byte_size=10_000_000,
+        page_count=0,
+        paragraph_count=5000,
+        chunks=tuple(
+            CanonicalChunk.create(
+                ordinal=index,
+                content="x" * 2000,
+                source_location={"paragraph": index},
+            )
+            for index in range(5000)
+        ),
     )
-    assert (
-        runner_module._child_output_limit(ParserLimits(max_normalized_characters=500_000))
-        >= 2_048_576
+    payload = runner_module._json_bytes(
+        {
+            "kind": "ok",
+            "result": runner_module._result_envelope(result).model_dump(mode="json"),
+        }
     )
+    assert len(payload) < 64 * 1024 * 1024
+    assert len(runner_module._parse_result_or_error(payload).chunks) == 5000
+
+
+def test_parser_runner_rejects_request_over_protocol_budget_before_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_MAX_CHILD_REQUEST_BYTES", 4)
+    with pytest.raises(ParserLimitExceeded, match="configured input budget"):
+        ParserRunner().parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="oversized-request.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
+        )
 
 
 def test_child_sandbox_applies_cpu_and_address_space_limits(
@@ -559,6 +602,62 @@ def test_child_sandbox_applies_cpu_and_address_space_limits(
         resource.RLIMIT_CPU,
         resource.RLIMIT_AS,
     }
+
+
+def test_child_result_rejects_oversized_base64_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_configure_child_sandbox", lambda *args, **kwargs: None)
+    request = runner_module._RequestEnvelope.model_validate(
+        {
+            "data_b64": base64.b64encode(b"x" * 11).decode("ascii"),
+            "suffix": ".pdf",
+            "filename": "oversized.pdf",
+            "declared_mime": "application/pdf",
+            "limits": dataclasses.asdict(ParserLimits(max_input_bytes=10)),
+            "timeout_seconds": 1.0,
+            "sandbox_enabled": False,
+        }
+    )
+
+    result = runner_module._child_result(request)
+    assert isinstance(result, runner_module._ErrorEnvelope)
+    assert result.code == "size_exceeded"
+
+
+def test_child_protocol_read_is_bounded() -> None:
+    with pytest.raises(ParserLimitExceeded, match="protocol size"):
+        runner_module._read_bounded(io.BytesIO(b"12345"), max_bytes=4)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"kind":"ok","kind":"error"}',
+        b'{"kind":"ok","value":NaN}',
+        b'{"kind":"ok",',
+    ],
+)
+def test_parser_protocol_rejects_duplicate_nan_and_invalid_json(payload: bytes) -> None:
+    with pytest.raises(ParserSandboxUnavailable):
+        runner_module._parse_result_or_error(payload)
+
+
+def test_child_main_returns_stable_error_for_bounded_oversized_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner_module, "_MAX_CHILD_REQUEST_BYTES", 4)
+    stdin = SimpleNamespace(buffer=io.BytesIO(b"12345"))
+    stdout = io.BytesIO()
+    monkeypatch.setattr(runner_module.sys, "stdin", stdin)
+    monkeypatch.setattr(runner_module.sys, "stdout", SimpleNamespace(buffer=stdout))
+
+    runner_module._child_main()
+
+    envelope = runner_module._strict_json_loads(stdout.getvalue())
+    assert isinstance(envelope, dict)
+    assert envelope["kind"] == "error"
+    assert envelope["code"] == "size_exceeded"
 
 
 def test_registry_keeps_pdf_and_docx_on_runner_even_when_text_is_unisolated() -> None:
@@ -596,6 +695,7 @@ def test_parser_runner_caps_child_output_and_kills_process_group(
 
     with pytest.raises(ParserSandboxUnavailable, match="output"):
         ParserRunner(
+            max_output_bytes=1 * 1024 * 1024,
             sandbox_executable=str(wrapper),
             sandbox_args=("--die-with-parent", "--unshare-net"),
         ).parse_bytes(

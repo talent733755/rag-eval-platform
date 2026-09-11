@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from rag_eval_api.storage.errors import (
+    BlobAlreadyExists,
     BlobChecksumMismatch,
     BlobKeyError,
     BlobNotFound,
@@ -43,8 +44,9 @@ def test_local_blob_store_rejects_traversal_absolute_and_symlink_keys(tmp_path: 
     outside.write_bytes(b"secret")
 
     for key in ("../outside.txt", "/etc/passwd", "a/../../outside", "a/b/c"):
-        with pytest.raises(BlobKeyError):
+        with pytest.raises(BlobKeyError) as error:
             store.exists(key)
+        assert error.value.code == "invalid_storage_key"
 
     link = tmp_path / "blobs" / "aa"
     link.parent.mkdir(parents=True, exist_ok=True)
@@ -75,8 +77,9 @@ def test_local_blob_store_does_not_overwrite_or_follow_existing_storage_path(
     first = store.put(io.BytesIO(b"one"))
     target = store._path_for_key(first.storage_key)
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(BlobAlreadyExists) as error:
         store._publish_temp_file(store._write_temp(io.BytesIO(b"two")), target)
+    assert error.value.code == "blob_already_exists"
 
     assert target.read_bytes() == b"one"
     store.delete(first.storage_key)

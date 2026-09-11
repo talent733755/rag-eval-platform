@@ -79,6 +79,14 @@ crash outcomes retain the public `parse_timeout` and
 `parser_sandbox_unavailable` error codes. The current parser runner is not a
 worker process and does not complete upload-to-parse workflow.
 
+The child output budget is explicit `MAX_PARSER_OUTPUT_BYTES` configuration
+(64 MiB by default, with a 1 MiB–256 MiB bound) and is reserved for serialized
+JSON rather than inferred from normalized character counts. Parser requests use
+a bounded JSON stdin protocol: the parent applies the base64 expansion budget,
+the child performs bounded reads under a fixed protocol ceiling, and encoded
+input is checked before decoding. This prevents a child from turning malformed
+or oversized protocol input into an unbounded allocation.
+
 PDF/DOCX are always dispatched through `ParserRunner`; the direct parser
 classes are not an ingestion entrypoint. `pypdf` may materialize decoded PDF
 streams before a parser-level byte check, so the runner's input cap, child

@@ -21,7 +21,7 @@ class ParserLimitExceeded(ParserError):
 
 
 class ParserSecurityError(ParserError):
-    code = "parse_failed"
+    code = "security_violation"
 
 
 class ParserTimeout(ParserError):

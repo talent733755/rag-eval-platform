@@ -14,6 +14,11 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator, model_vali
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from rag_eval_api.parsers.models import ParserLimits
+from rag_eval_api.parsers.runner import (
+    DEFAULT_MAX_PARSER_OUTPUT_BYTES,
+    MAX_MAX_PARSER_OUTPUT_BYTES,
+    ParserRunner,
+)
 
 APP_ENV_DEVELOPMENT: Literal["development"] = "development"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval"
@@ -42,6 +47,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
+        loc_by_alias=False,
         env_file=repository_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
@@ -175,6 +181,14 @@ class Settings(BaseSettings):
             ),
         ),
     ] = 10
+    max_parser_output_bytes: Annotated[
+        int,
+        Field(
+            ge=1 * 1024 * 1024,
+            le=MAX_MAX_PARSER_OUTPUT_BYTES,
+            validation_alias=AliasChoices("MAX_PARSER_OUTPUT_BYTES", "max_parser_output_bytes"),
+        ),
+    ] = DEFAULT_MAX_PARSER_OUTPUT_BYTES
     max_docx_zip_entries: Annotated[
         int,
         Field(
@@ -479,6 +493,17 @@ class Settings(BaseSettings):
             max_docx_uncompressed_bytes=self.max_docx_uncompressed_bytes,
             max_docx_compression_ratio=self.max_docx_compression_ratio,
             max_docx_xml_depth=self.max_docx_xml_depth,
+        )
+
+    def parser_runner(self) -> ParserRunner:
+        """Build the configured subprocess boundary for PDF/DOCX parsing."""
+
+        return ParserRunner(
+            default_timeout_seconds=float(self.max_parser_wall_clock_seconds),
+            max_output_bytes=self.max_parser_output_bytes,
+            require_resource_limits=self.parser_require_resource_limits,
+            sandbox_executable=self.parser_sandbox_executable,
+            sandbox_args=self.parser_sandbox_args,
         )
 
 

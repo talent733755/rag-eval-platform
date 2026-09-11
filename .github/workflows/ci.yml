@@ -125,9 +125,6 @@ jobs:
       - name: Install API dependencies
         run: uv sync --directory apps/api --locked
 
-      - name: Configure integration base environment
-        run: cp .env.example .env
-
       - name: Run PostgreSQL integration gate
         run: make test-integration
 
