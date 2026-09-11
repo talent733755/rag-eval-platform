@@ -29,7 +29,7 @@ readonly database_name="rag_eval_test_${run_id:0:45}"
 	exit 2
 }
 
-compose=(docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
+compose=(env -i "PATH=$PATH" COMPOSE_DISABLE_ENV_FILE=1 docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
 	--file "$repo_root/docker-compose.integration.yml" --env-file "$compose_env_file"
 	--profile integration --project-name "$compose_project")
 

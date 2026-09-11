@@ -61,16 +61,18 @@ non-privileged OS/container sandbox for hostile files.
 PDF/DOCX jobs. It runs a disposable subprocess and terminates its process group
 on a hard timeout. Development may use a restricted fallback with Python-level
 socket denial, but that is not OS network isolation. Production and
-`PARSER_REQUIRE_RESOURCE_LIMITS=true` require an explicit configured sandbox
-executable/argument profile (such as approved `unshare`/`bwrap`) plus CPU and
-memory limit support. The executable must resolve to the root-owned,
-non-group/other-writable absolute-path allowlist for supported `bwrap` and
-`unshare` binaries; symlink aliases, `/usr/bin/env`, basename matches, and
-custom launchers are rejected. The accepted token templates are exact and
-ordered: `bwrap --unshare-net --die-with-parent --new-session -- <parser argv>`
-or `unshare --user --map-root-user --mount --uts --ipc --net --pid --fork
---kill-child -- <parser argv>`. The runner probes the selected template with a
-harmless command before accepting it; parser argv cannot be inserted before
+`PARSER_REQUIRE_RESOURCE_LIMITS=true` require an explicit configured,
+filesystem-isolated `bwrap` profile plus CPU and memory limit support. The
+executable must resolve to the root-owned, non-group/other-writable absolute
+path allowlist; symlink aliases, `/usr/bin/env`, basename matches, `unshare`,
+and custom launchers are rejected. The accepted token template is exact and
+ordered: `bwrap --unshare-user --uid 65534 --gid 65534 --unshare-net
+--unshare-pid --die-with-parent --new-session --cap-drop ALL --tmpfs /
+--ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64
+/lib64 --ro-bind /etc /etc --proc /proc --dev /dev --tmpfs /tmp --chdir /tmp
+-- <parser argv>`. The runner appends read-only binds for the interpreter and
+package, then probes identity, network, resource, and host-filesystem
+sentinels before accepting the profile; parser argv cannot be inserted before
 the separator. Child stdout/stderr are hard-limited and the complete process
 group is killed on timeout, malformed output, EOF, crash, or output overflow.
 The parent/child protocol is strict UTF-8 JSON, never

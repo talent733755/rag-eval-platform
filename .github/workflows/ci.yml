@@ -125,6 +125,12 @@ jobs:
       - name: Install API dependencies
         run: uv sync --directory apps/api --locked
 
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck
+
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh scripts/ci/*.sh
+
       - name: Run PostgreSQL integration gate
         run: make test-integration
 

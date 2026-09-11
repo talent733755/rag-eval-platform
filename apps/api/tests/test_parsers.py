@@ -477,13 +477,14 @@ def test_sandbox_template_requires_exact_order_and_rejects_extra_args(
         lambda *_args, **_kwargs: SimpleNamespace(st_uid=0, st_mode=0o100755),
     )
 
-    exact = ("--unshare-net", "--die-with-parent", "--new-session")
+    monkeypatch.setattr(runner_module, "_probe_sandbox_template", lambda *_args: True)
+    exact = runner_module._SANDBOX_TEMPLATES["bwrap"]
     assert sandbox_command_available(str(bwrap), exact)
     assert not sandbox_command_available(str(bwrap), (*exact, "--ro-bind", "/", "/"))
     assert not sandbox_command_available(str(bwrap), tuple(reversed(exact)))
 
 
-def test_unshare_template_requires_exact_order_and_rejects_bwrap_flags(
+def test_unshare_is_rejected_without_a_filesystem_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     unshare = tmp_path / "unshare"
@@ -499,10 +500,20 @@ def test_unshare_template_requires_exact_order_and_rejects_bwrap_flags(
         lambda *_args, **_kwargs: SimpleNamespace(st_uid=0, st_mode=0o100755),
     )
 
-    exact = runner_module._SANDBOX_TEMPLATES["unshare"]
-    assert sandbox_command_available(str(unshare), exact)
-    assert not sandbox_command_available(str(unshare), (*exact, "--die-with-parent"))
-    assert not sandbox_command_available(str(unshare), ("--net", *exact[1:]))
+    assert not sandbox_command_available(
+        str(unshare),
+        (
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--uts",
+            "--ipc",
+            "--net",
+            "--pid",
+            "--fork",
+            "--kill-child",
+        ),
+    )
 
 
 def test_parser_runner_places_parser_argv_after_sandbox_separator(
@@ -515,6 +526,7 @@ def test_parser_runner_places_parser_argv_after_sandbox_separator(
         "sandbox_command_available",
         lambda _executable, _args: True,
     )
+    monkeypatch.setattr(runner_module, "_sandbox_runtime_bind_args", lambda: [])
     command = ParserRunner(
         sandbox_executable=str(bwrap),
         sandbox_args=("--unshare-net", "--die-with-parent", "--new-session"),

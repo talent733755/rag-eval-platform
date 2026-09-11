@@ -45,6 +45,7 @@ while (($# > 0)); do
   esac
 done
 
+compose_command=(env -i "PATH=$PATH" COMPOSE_DISABLE_ENV_FILE=1 docker compose)
 compose_args=(--project-directory "$repo_root")
 for compose_file in "${compose_files[@]}"; do
   compose_args+=(--file "$compose_file")
@@ -119,7 +120,7 @@ run_probe() {
 }
 
 postgres_probe() {
-  exec docker compose "${compose_args[@]}" exec -T postgres sh -c \
+  exec "${compose_command[@]}" "${compose_args[@]}" exec -T postgres sh -c \
     'pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"' \
     >/dev/null 2>&1
 }
@@ -129,7 +130,7 @@ postgres_is_ready() {
 }
 
 redis_probe() {
-  exec docker compose "${compose_args[@]}" exec -T redis sh -c \
+  exec "${compose_command[@]}" "${compose_args[@]}" exec -T redis sh -c \
     'test "$(redis-cli ping)" = PONG' \
     >/dev/null 2>&1
 }

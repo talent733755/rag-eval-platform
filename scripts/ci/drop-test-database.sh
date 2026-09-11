@@ -17,11 +17,12 @@ readonly repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
 source "$test_env_file"
 [[ "${TEST_DATABASE_NAME:-}" =~ ^[a-zA-Z][a-zA-Z0-9_]{0,62}$ ]] || exit 0
 
-compose=(docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
+compose=(env -i "PATH=$PATH" COMPOSE_DISABLE_ENV_FILE=1 docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
 	--file "$repo_root/docker-compose.integration.yml" --env-file "$compose_env_file"
 	--profile integration --project-name "$compose_project")
-"${compose[@]}" exec -T postgres sh -ec \
-	'psql -v ON_ERROR_STOP=1 -v dbname="$1" -U "$POSTGRES_USER" -d postgres -c \
-	"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'"'"'dbname'"'"';" \
-	psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -c \
-	"DROP DATABASE IF EXISTS \"$1\";"' sh "$TEST_DATABASE_NAME" >/dev/null 2>&1 || true
+if ! "${compose[@]}" exec -T postgres sh -ec \
+	'dropdb --if-exists --maintenance-db=postgres -U "$POSTGRES_USER" "$1"' \
+	sh "$TEST_DATABASE_NAME" >/dev/null 2>&1; then
+	printf 'failed to drop integration database %s\n' "$TEST_DATABASE_NAME" >&2
+	exit 1
+fi

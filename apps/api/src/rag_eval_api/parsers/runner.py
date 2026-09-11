@@ -58,28 +58,56 @@ _ERROR_CODES = frozenset(
 _MIN_CHILD_OUTPUT_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_PARSER_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_MAX_PARSER_OUTPUT_BYTES = 256 * 1024 * 1024
-_OUTPUT_ENVELOPE_BYTES = 64 * 1024
 _REQUEST_METADATA_BYTES = 64 * 1024
-_MAX_CHILD_REQUEST_BYTES = ((MAX_MAX_PARSER_INPUT_BYTES + 2) // 3) * 4 + _REQUEST_METADATA_BYTES
+_MAX_ENCODED_INPUT_BYTES = ((MAX_MAX_PARSER_INPUT_BYTES + 2) // 3) * 4
+_MAX_CHILD_REQUEST_BYTES = _MAX_ENCODED_INPUT_BYTES + _REQUEST_METADATA_BYTES
+_MAX_CHILD_STDERR_BYTES = 64 * 1024
 _STARTUP_CPU_SECONDS = 302
 _STARTUP_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 _SAFE_CHILD_PATH = "/usr/local/bin:/usr/bin:/bin"
 _SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
     "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
-    "unshare": frozenset({"/usr/bin/unshare", "/bin/unshare", "/usr/local/bin/unshare"}),
+    # ``unshare`` cannot provide the required filesystem allowlist here, so it
+    # is intentionally not an accepted parser boundary.
 }
 _SANDBOX_TEMPLATES: Mapping[str, tuple[str, ...]] = {
-    "bwrap": ("--unshare-net", "--die-with-parent", "--new-session"),
-    "unshare": (
-        "--user",
-        "--map-root-user",
-        "--mount",
-        "--uts",
-        "--ipc",
-        "--net",
-        "--pid",
-        "--fork",
-        "--kill-child",
+    "bwrap": (
+        "--unshare-user",
+        "--uid",
+        "65534",
+        "--gid",
+        "65534",
+        "--unshare-net",
+        "--unshare-pid",
+        "--die-with-parent",
+        "--new-session",
+        "--cap-drop",
+        "ALL",
+        "--tmpfs",
+        "/",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind",
+        "/bin",
+        "/bin",
+        "--ro-bind",
+        "/lib",
+        "/lib",
+        "--ro-bind",
+        "/lib64",
+        "/lib64",
+        "--ro-bind",
+        "/etc",
+        "/etc",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--chdir",
+        "/tmp",
     ),
 }
 
@@ -106,13 +134,18 @@ class _LimitsEnvelope(_StrictModel):
 
 
 class _RequestEnvelope(_StrictModel):
-    data_b64: str = Field(max_length=_MAX_CHILD_REQUEST_BYTES)
+    data_b64: str = Field(max_length=_MAX_ENCODED_INPUT_BYTES)
     suffix: Literal[".pdf", ".docx"]
     filename: str = Field(max_length=1024)
     declared_mime: str | None = Field(default=None, max_length=255)
     limits: _LimitsEnvelope
     timeout_seconds: float
     sandbox_enabled: bool
+    max_output_bytes: int = Field(
+        default=DEFAULT_MAX_PARSER_OUTPUT_BYTES,
+        ge=_MIN_CHILD_OUTPUT_BYTES,
+        le=MAX_MAX_PARSER_OUTPUT_BYTES,
+    )
 
 
 class _ChunkEnvelope(_StrictModel):
@@ -153,9 +186,9 @@ class _ErrorEnvelope(_StrictModel):
 
 
 def restricted_sandbox_available() -> bool:
-    """Whether this runtime can enforce CPU and address-space limits."""
+    """Whether this runtime exposes the resource controls used by the child."""
 
-    return _resource_limits_supported() and os.geteuid() != 0
+    return _resource_limits_supported()
 
 
 def _resource_limits_supported() -> bool:
@@ -173,7 +206,7 @@ def _resource_limits_supported() -> bool:
 
 
 def sandbox_command_available(executable: str | None, args: Sequence[str]) -> bool:
-    """Check a supported no-network, parent-death-aware OS sandbox profile."""
+    """Check a supported, filesystem-isolated bwrap profile by executing it."""
 
     if not executable or not executable.strip() or not os.path.isabs(executable):
         return False
@@ -199,34 +232,48 @@ def sandbox_command_available(executable: str | None, args: Sequence[str]) -> bo
 
 
 def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
-    """Exercise the exact profile's non-root, no-network and limit boundary."""
+    """Exercise the exact profile's filesystem, identity, network and limit boundary."""
 
     process: subprocess.Popen[bytes] | None = None
     probe_code = (
         "import os, resource, socket\n"
-        "uid_map = open('/proc/self/uid_map', encoding='ascii').read().split()\n"
-        "mapped_root = len(uid_map) >= 3 and uid_map[:2] == ['0', str(os.getuid())]\n"
-        "if os.geteuid() == 0 and not mapped_root: raise SystemExit(11)\n"
+        "if os.geteuid() != 65534 or os.getuid() != 65534: raise SystemExit(11)\n"
         "resource.setrlimit(resource.RLIMIT_CPU, (1, 1))\n"
         "resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))\n"
         "if resource.getrlimit(resource.RLIMIT_CPU)[0] != 1: raise SystemExit(12)\n"
         "if resource.getrlimit(resource.RLIMIT_AS)[0] != 256 * 1024 * 1024: raise SystemExit(13)\n"
         "interfaces = {name for _, name in socket.if_nameindex()}\n"
         "if interfaces - {'lo'}: raise SystemExit(14)\n"
+        "if os.path.exists(%r): raise SystemExit(15)\n"
+        "with open('/tmp/parser-probe-write', 'w', encoding='ascii') as handle: handle.write('ok')\n"
+        "status = open('/proc/self/status', encoding='ascii').read()\n"
+        "if next((line for line in status.splitlines() if line.startswith('CapEff:')), '') not in {'CapEff:\\t0000000000000000', 'CapEff:        0000000000000000'}: raise SystemExit(16)\n"
     )
     try:
-        with _private_parser_cwd() as cwd:
+        with tempfile.TemporaryDirectory(prefix="rag-eval-parser-probe-") as probe_directory:
+            sentinel_path = Path(probe_directory) / "host-sentinel"
+            sentinel_path.write_text("must remain outside sandbox", encoding="ascii")
+            sentinel = str(sentinel_path)
+            command = [
+                executable,
+                *args,
+                *_sandbox_runtime_bind_args(),
+                "--",
+                sys.executable,
+                "-c",
+                probe_code % sentinel,
+            ]
             process = subprocess.Popen(
-                [executable, *args, "--", sys.executable, "-c", probe_code],
+                command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
-                cwd=cwd,
+                cwd="/",
                 env=_child_environment(),
             )
             process.wait(timeout=2.0)
-            return process.returncode == 0
+            return process.returncode == 0 and not sentinel_path.exists()
     except (OSError, subprocess.TimeoutExpired):
         return False
     finally:
@@ -271,6 +318,31 @@ def _child_environment() -> dict[str, str]:
         "PYTHONSAFEPATH": "1",
         "PYTHONUNBUFFERED": "1",
     }
+
+
+def _sandbox_runtime_bind_args() -> list[str]:
+    """Bind only the interpreter and parser code into bwrap's tmpfs root."""
+
+    paths = {
+        str(Path(sys.executable).absolute()),
+        str(Path(sys.executable).resolve()),
+        str(Path(sys.prefix).resolve()),
+        str(Path(__file__).resolve().parents[2]),
+    }
+    arguments: list[str] = []
+    created_parents: set[str] = set()
+    for source in sorted(paths):
+        source_path = Path(source)
+        if not source_path.exists():
+            return []
+        for parent in reversed(source_path.parents):
+            parent_string = str(parent)
+            if parent_string == "/" or parent_string in created_parents:
+                continue
+            arguments.extend(("--dir", parent_string))
+            created_parents.add(parent_string)
+        arguments.extend(("--ro-bind", source, source))
+    return arguments
 
 
 @contextmanager
@@ -320,8 +392,8 @@ class ParserRunner:
     Without ``sandbox_executable`` this is a development fallback only. It
     applies process-local limits where possible and monkey-patches Python
     sockets, but that is not OS-level network isolation. Strict deployments
-    must provide a supported ``bwrap`` or ``unshare`` profile with required
-    flags and resource-limit support.
+    must provide the supported filesystem-isolated ``bwrap`` profile with
+    required flags and resource-limit support.
     """
 
     def __init__(
@@ -386,6 +458,7 @@ class ParserRunner:
             limits=_LimitsEnvelope(**dataclasses.asdict(limits)),
             timeout_seconds=float(timeout),
             sandbox_enabled=self.uses_os_sandbox,
+            max_output_bytes=self.max_output_bytes,
         )
         request_bytes = _json_bytes(request.model_dump(mode="json"))
         if len(request_bytes) > _MAX_CHILD_REQUEST_BYTES or len(request_bytes) > _max_request_bytes(
@@ -479,7 +552,7 @@ class ParserRunner:
         )
         stderr_thread = threading.Thread(
             target=drain,
-            args=(process.stderr, stderr_buffer, output_limit),
+            args=(process.stderr, stderr_buffer, _MAX_CHILD_STDERR_BYTES),
             daemon=True,
         )
         input_thread = threading.Thread(target=write_request, args=(process.stdin,), daemon=True)
@@ -515,7 +588,13 @@ class ParserRunner:
             child.append("--strict")
         if self.sandbox_executable is None:
             return child
-        return [self.sandbox_executable, *self.sandbox_args, "--", *child]
+        return [
+            self.sandbox_executable,
+            *self.sandbox_args,
+            *_sandbox_runtime_bind_args(),
+            "--",
+            *child,
+        ]
 
     @staticmethod
     def _terminate(process: subprocess.Popen[bytes], *, force_group: bool = False) -> None:
@@ -659,6 +738,7 @@ def _disable_network_fallback() -> None:
 def _child_main() -> None:
     original_socket = socket.socket
     original_create_connection = socket.create_connection
+    request: _RequestEnvelope | None = None
     try:
         try:
             _configure_startup_limits()
@@ -683,7 +763,14 @@ def _child_main() -> None:
         # parent interpreter's networking primitives.
         setattr(socket, "socket", original_socket)
         setattr(socket, "create_connection", original_create_connection)
-    sys.stdout.buffer.write(_json_bytes(envelope.model_dump(mode="json")))
+    payload = _json_bytes(envelope.model_dump(mode="json"))
+    if request is not None and len(payload) > request.max_output_bytes:
+        payload = _json_bytes(
+            _error_envelope(
+                "parser_sandbox_unavailable", "parser sandbox output exceeded the limit"
+            ).model_dump(mode="json")
+        )
+    sys.stdout.buffer.write(payload)
     sys.stdout.buffer.flush()
 
 

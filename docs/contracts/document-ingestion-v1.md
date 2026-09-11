@@ -108,15 +108,19 @@ development, the runner may use a disposable process fallback with process
 limits where available and Python-level socket denial; this fallback is not OS
 network isolation. Production and `PARSER_REQUIRE_RESOURCE_LIMITS=true` require
 an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
-non-root, no-network, CPU, and memory limits. Only supported `bwrap` profiles
-with these exact ordered templates are accepted: `bwrap
---unshare-net --die-with-parent --new-session -- <parser argv>`, or `unshare
---user --map-root-user --mount --uts --ipc --net --pid --fork --kill-child
--- <parser argv>`. `/usr/bin/env`, extra flags, reordered flags, and parser
-arguments before the separator are rejected. The executable must be an
-absolute real path in the root-owned, non-group/other-writable allowlist;
-basename matches and symlink aliases are rejected, and the exact template is
-probed before use. Child stdout and stderr are each hard-limited; overflow
+non-root, no-network, CPU, memory, and filesystem limits. Only the supported
+filesystem-isolated `bwrap` profile is accepted, with this exact ordered
+template (the runner appends read-only binds for the interpreter/package):
+`bwrap --unshare-user --uid 65534 --gid 65534 --unshare-net --unshare-pid
+--die-with-parent --new-session --cap-drop ALL --tmpfs / --ro-bind /usr /usr
+--ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /etc
+/etc --proc /proc --dev /dev --tmpfs /tmp --chdir /tmp -- <parser argv>`.
+`unshare`, `/usr/bin/env`, extra flags, reordered flags, and parser arguments
+before the separator are rejected. The executable must be an absolute real
+path in the root-owned, non-group/other-writable allowlist; basename matches
+and symlink aliases are rejected, and the exact template is probed against
+identity, network, resource, and host-filesystem sentinels before use. Child
+stdout and stderr are each hard-limited; overflow
 maps to `parser_sandbox_unavailable` after the complete process group is
 terminated. If those capabilities are
 unavailable, settings fail closed. The child protocol is strict UTF-8 JSON with
@@ -133,9 +137,11 @@ The serialized child-output budget is explicit configuration
 It is independent from the normalized-character limit so a valid result with
 many small chunks is not rejected by a character-only estimate. The JSON
 request sent over stdin is also bounded: the parent rejects requests larger
-than the base64 input budget plus 64 KiB metadata, and the child reads no more
-than its fixed 768 MiB protocol ceiling. The child checks the encoded input
-budget before base64 decoding and checks the decoded byte count afterward.
+than the base64 input budget plus 64 KiB metadata. The input budget is derived
+from the 64 MiB maximum parser input (`MAX_MAX_PARSER_INPUT_BYTES`) and the
+base64 expansion, so it is bounded to roughly 85 MiB on the wire. The child
+checks the encoded input budget before base64 decoding and checks the decoded
+byte count afterward.
 
 PDF and DOCX always use this runner, even when text parsers are used in a
 non-isolated unit-test mode. Because `pypdf` can materialize a decoded stream

@@ -17,13 +17,14 @@ cleanup() {
   local status=$?
   set +e
   if [[ -f "$test_env_file" ]]; then
-    bash "$repo_root/scripts/ci/drop-test-database.sh" \
-      "$test_env_file" "$compose_env_file" "$compose_project"
+    if ! bash "$repo_root/scripts/ci/drop-test-database.sh" \
+      "$test_env_file" "$compose_env_file" "$compose_project"; then
+      printf '%s\n' 'WARNING: integration test database cleanup failed' >&2
+    fi
   fi
-  docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml" \
-    --file "$repo_root/docker-compose.integration.yml" --env-file "$compose_env_file" \
-    --profile integration --project-name "$compose_project" down --volumes --remove-orphans \
-    >/dev/null 2>&1
+  if ! "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1; then
+    printf '%s\n' 'WARNING: integration Compose cleanup failed' >&2
+  fi
   rm -rf -- "$runtime_dir"
   exit "$status"
 }
@@ -48,7 +49,7 @@ COMPOSE_REDIS_URL=redis://redis:6379/0
 COMPOSE_PROJECT_NAME=$compose_project
 EOF
 
-compose=(docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
+compose=(env -i "PATH=$PATH" COMPOSE_DISABLE_ENV_FILE=1 docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
   --file "$repo_root/docker-compose.integration.yml" --env-file "$compose_env_file"
   --profile integration --project-name "$compose_project")
 "${compose[@]}" config >/dev/null
