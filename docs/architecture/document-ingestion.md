@@ -63,8 +63,10 @@ on a hard timeout. Development may use a restricted fallback with Python-level
 socket denial, but that is not OS network isolation. Production and
 `PARSER_REQUIRE_RESOURCE_LIMITS=true` require an explicit configured sandbox
 executable/argument profile (such as approved `unshare`/`bwrap`) plus CPU and
-memory limit support; otherwise settings fail closed. Timeout, EOF, and crash
-outcomes retain the public `parse_timeout` and
+memory limit support; only profiles with explicit network-isolation and
+parent-death flags are accepted. The parent/child protocol is strict UTF-8 JSON,
+never pickle or another executable object format. Timeout, malformed output,
+EOF, and crash outcomes retain the public `parse_timeout` and
 `parser_sandbox_unavailable` error codes. The current parser runner is not a
 worker process and does not complete upload-to-parse workflow.
 

@@ -107,13 +107,18 @@ development, the runner may use a disposable process fallback with process
 limits where available and Python-level socket denial; this fallback is not OS
 network isolation. Production and `PARSER_REQUIRE_RESOURCE_LIMITS=true` require
 an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
-non-root, no-network, CPU, and memory limits (for example an approved
-`unshare` or `bwrap` profile). If those capabilities are unavailable, settings
-fail closed. Hard timeouts terminate the process group and map to
-`parse_timeout`; EOF/crash/invalid child output maps to
-`parser_sandbox_unavailable`. This runner is the parser boundary for the next
-worker phase; it does not itself implement a worker, upload route, or
-upload-to-parse workflow.
+non-root, no-network, CPU, and memory limits. Only supported `bwrap` profiles
+with `--unshare-net` and `--die-with-parent`, or supported `unshare` profiles
+with `--net`, `--fork`, and `--kill-child`, are accepted; `/usr/bin/env` and
+other command wrappers are not sandboxes. If those capabilities are
+unavailable, settings fail closed. The child protocol is strict UTF-8 JSON with
+an `{"kind":"ok","result":...}` or
+`{"kind":"error","code":...,"message":...}` envelope. The parent never
+deserializes executable object formats; malformed, duplicate-key, invalid
+UTF-8, EOF, or crashed output maps to `parser_sandbox_unavailable`. Hard
+timeouts terminate the process group and map to `parse_timeout`. This runner
+is the parser boundary for the next worker phase; it does not itself implement
+a worker, upload route, or upload-to-parse workflow.
 
 ## Tenant and resource identity
 

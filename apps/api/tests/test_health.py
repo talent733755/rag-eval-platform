@@ -165,7 +165,9 @@ class StalledRedisClient:
         return True
 
 
-def test_readiness_times_out_stalled_database(client_factory: object, redis_client: FakeRedisClient) -> None:
+def test_readiness_times_out_stalled_database(
+    client_factory: object, redis_client: FakeRedisClient
+) -> None:
     from rag_eval_api.main import HEALTH_CHECK_TIMEOUT_SECONDS
 
     started = time.monotonic()
@@ -177,7 +179,9 @@ def test_readiness_times_out_stalled_database(client_factory: object, redis_clie
     assert time.monotonic() - started < HEALTH_CHECK_TIMEOUT_SECONDS + 1
 
 
-def test_readiness_times_out_stalled_redis(client_factory: object, db_session: FakeDatabaseSession) -> None:
+def test_readiness_times_out_stalled_redis(
+    client_factory: object, db_session: FakeDatabaseSession
+) -> None:
     from rag_eval_api.main import HEALTH_CHECK_TIMEOUT_SECONDS
 
     started = time.monotonic()
@@ -205,7 +209,9 @@ def test_log_formatter_emits_structured_fields() -> None:
     assert payload["status_code"] == 200
 
 
-def test_unhandled_failure_logs_sanitized_context_and_completion(app: object, caplog: pytest.LogCaptureFixture) -> None:
+def test_unhandled_failure_logs_sanitized_context_and_completion(
+    app: object, caplog: pytest.LogCaptureFixture
+) -> None:
     from fastapi import FastAPI
 
     from rag_eval_api.main import logger

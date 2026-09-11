@@ -24,7 +24,9 @@ from rag_eval_api.parsers.text import _finish_chunks
 class DocxParser:
     parser_version = "docx-v1"
 
-    def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
+    def parse(
+        self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits
+    ) -> ParseResult:
         del filename, declared_mime
         self._validate_zip(data, limits)
         try:
@@ -41,9 +43,7 @@ class DocxParser:
             blocks.append((content, {"paragraph": index}, heading))
             if len(blocks) > limits.max_paragraphs:
                 raise ParserLimitExceeded("paragraph count exceeds the configured limit")
-        return _finish_chunks(
-            blocks, data=data, parser_version=self.parser_version, limits=limits
-        )
+        return _finish_chunks(blocks, data=data, parser_version=self.parser_version, limits=limits)
 
     @staticmethod
     def _validate_zip(data: bytes, limits: ParserLimits) -> None:
@@ -59,17 +59,25 @@ class DocxParser:
                 for info in infos:
                     name = info.filename.replace("\\", "/")
                     path = name.lstrip("/")
-                    if name.startswith("/") or path != name or any(part == ".." for part in name.split("/")):
+                    if (
+                        name.startswith("/")
+                        or path != name
+                        or any(part == ".." for part in name.split("/"))
+                    ):
                         raise ParserSecurityError("DOCX ZIP contains an unsafe path")
                     mode = (info.external_attr >> 16) & 0o170000
                     if mode == stat.S_IFLNK:
                         raise ParserSecurityError("DOCX ZIP contains a symlink")
                     total_uncompressed += info.file_size
                     if total_uncompressed > limits.max_docx_uncompressed_bytes:
-                        raise ParserLimitExceeded("DOCX uncompressed size exceeds the configured limit")
+                        raise ParserLimitExceeded(
+                            "DOCX uncompressed size exceeds the configured limit"
+                        )
                     compressed = max(info.compress_size, 1)
                     if info.file_size / compressed > limits.max_docx_compression_ratio:
-                        raise ParserLimitExceeded("DOCX compression ratio exceeds the configured limit")
+                        raise ParserLimitExceeded(
+                            "DOCX compression ratio exceeds the configured limit"
+                        )
                     if time.monotonic() - started > limits.max_pdf_wall_clock_seconds:
                         raise ParserTimeout("DOCX parsing exceeded the wall-clock limit")
                     if name.lower().endswith(".xml"):
@@ -77,10 +85,14 @@ class DocxParser:
                             xml_data = xml_file.read(limits.max_docx_uncompressed_bytes + 1)
                         try:
                             depth = 0
-                            for event, _ in ET.iterparse(io.BytesIO(xml_data), events=("start", "end")):
+                            for event, _ in ET.iterparse(
+                                io.BytesIO(xml_data), events=("start", "end")
+                            ):
                                 depth += 1 if event == "start" else -1
                                 if depth > limits.max_docx_xml_depth:
-                                    raise ParserLimitExceeded("DOCX XML depth exceeds the configured limit")
+                                    raise ParserLimitExceeded(
+                                        "DOCX XML depth exceeds the configured limit"
+                                    )
                         except ParserLimitExceeded:
                             raise
                         except (ET.ParseError, ValueError) as exc:

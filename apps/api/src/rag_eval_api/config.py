@@ -115,7 +115,9 @@ class Settings(BaseSettings):
     ] = 2_000
     max_pdf_objects: Annotated[
         int,
-        Field(ge=1, le=1_000_000, validation_alias=AliasChoices("MAX_PDF_OBJECTS", "max_pdf_objects")),
+        Field(
+            ge=1, le=1_000_000, validation_alias=AliasChoices("MAX_PDF_OBJECTS", "max_pdf_objects")
+        ),
     ] = 100_000
     max_pdf_decoded_stream_bytes: Annotated[
         int,
@@ -140,9 +142,7 @@ class Settings(BaseSettings):
         Field(
             ge=1,
             le=1_000_000,
-            validation_alias=AliasChoices(
-                "MAX_PDF_RECURSION_OBJECTS", "max_pdf_recursion_objects"
-            ),
+            validation_alias=AliasChoices("MAX_PDF_RECURSION_OBJECTS", "max_pdf_recursion_objects"),
         ),
     ] = 100_000
     parser_require_resource_limits: Annotated[
@@ -156,17 +156,13 @@ class Settings(BaseSettings):
     parser_sandbox_executable: Annotated[
         str | None,
         Field(
-            validation_alias=AliasChoices(
-                "PARSER_SANDBOX_EXECUTABLE", "parser_sandbox_executable"
-            )
+            validation_alias=AliasChoices("PARSER_SANDBOX_EXECUTABLE", "parser_sandbox_executable")
         ),
     ] = None
     parser_sandbox_args: Annotated[
         list[str],
         NoDecode,
-        Field(
-            validation_alias=AliasChoices("PARSER_SANDBOX_ARGS", "parser_sandbox_args")
-        ),
+        Field(validation_alias=AliasChoices("PARSER_SANDBOX_ARGS", "parser_sandbox_args")),
     ] = []
     max_parser_wall_clock_seconds: Annotated[
         int,
@@ -363,7 +359,9 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return None
         if not isinstance(value, str):
-            raise ValueError("PROVIDER_BASE_URL must be an absolute HTTP(S) URL without credentials")
+            raise ValueError(
+                "PROVIDER_BASE_URL must be an absolute HTTP(S) URL without credentials"
+            )
         parsed = urlsplit(value)
         if (
             parsed.scheme not in {"http", "https"}
@@ -386,10 +384,24 @@ class Settings(BaseSettings):
         secret = self.secret_key.get_secret_value().strip()
         blob_raw = os.fspath(self.blob_root)
         blob_path = Path(os.path.normpath(os.sep + blob_raw.lstrip(os.sep)))
+        resolved_blob_path = Path(os.path.realpath(blob_path))
+        temporary_roots = (
+            Path("/tmp"),
+            Path("/var/tmp"),
+            Path("/private/tmp"),
+            Path("/private/var/tmp"),
+        )
+
+        def is_under(path: Path, root: Path) -> bool:
+            try:
+                return os.path.commonpath((path, root)) == str(root)
+            except ValueError:
+                return False
+
         if (
             not os.path.isabs(blob_raw)
-            or blob_path == Path("/")
-            or str(blob_path).startswith(("/tmp", "/var/tmp"))
+            or resolved_blob_path == Path("/")
+            or any(is_under(resolved_blob_path, root) for root in temporary_roots)
         ):
             raise ValueError("BLOB_ROOT must be an absolute private non-temporary path")
         self.blob_root = str(blob_path)
@@ -433,12 +445,12 @@ class Settings(BaseSettings):
                 )
         from rag_eval_api.parsers.runner import (
             restricted_sandbox_available,
-            sandbox_executable_available,
+            sandbox_command_available,
         )
 
         strict_parser_sandbox = self.app_env == "production" or self.parser_require_resource_limits
         if strict_parser_sandbox and (
-            not sandbox_executable_available(self.parser_sandbox_executable)
+            not sandbox_command_available(self.parser_sandbox_executable, self.parser_sandbox_args)
             or not restricted_sandbox_available()
         ):
             raise ValueError(

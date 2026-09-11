@@ -57,7 +57,9 @@ def _finish_chunks(
 class TextParser:
     parser_version = "txt-v1"
 
-    def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
+    def parse(
+        self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits
+    ) -> ParseResult:
         del filename, declared_mime
         blocks: list[tuple[str, dict[str, int], str | None]] = []
         paragraph_lines: list[str] = []
@@ -75,15 +77,15 @@ class TextParser:
                 paragraph_index += 1
         if paragraph_lines:
             blocks.append(("\n".join(paragraph_lines), {"paragraph": paragraph_index}, None))
-        return _finish_chunks(
-            blocks, data=data, parser_version=self.parser_version, limits=limits
-        )
+        return _finish_chunks(blocks, data=data, parser_version=self.parser_version, limits=limits)
 
 
 class MarkdownParser:
     parser_version = "markdown-v1"
 
-    def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
+    def parse(
+        self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits
+    ) -> ParseResult:
         del filename, declared_mime
         blocks: list[tuple[str, dict[str, int], str | None]] = []
         heading: str | None = None
@@ -115,6 +117,4 @@ class MarkdownParser:
                     paragraph_start = line_number
                 paragraph_lines.append(line)
         flush()
-        return _finish_chunks(
-            blocks, data=data, parser_version=self.parser_version, limits=limits
-        )
+        return _finish_chunks(blocks, data=data, parser_version=self.parser_version, limits=limits)

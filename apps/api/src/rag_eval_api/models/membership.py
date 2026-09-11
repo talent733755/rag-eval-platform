@@ -69,7 +69,9 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"Membership(id={self.id!r}, project_id={self.project_id!r}, user_id={self.user_id!r})"
+        return (
+            f"Membership(id={self.id!r}, project_id={self.project_id!r}, user_id={self.user_id!r})"
+        )
 
 
 def _validate_membership_tenant(target: Membership) -> None:
@@ -91,12 +93,16 @@ def _validate_membership_tenant(target: Membership) -> None:
 
 
 @event.listens_for(Membership, "before_insert")
-def _validate_membership_before_insert(mapper: object, connection: object, target: Membership) -> None:
+def _validate_membership_before_insert(
+    mapper: object, connection: object, target: Membership
+) -> None:
     del mapper, connection
     _validate_membership_tenant(target)
 
 
 @event.listens_for(Membership, "before_update")
-def _validate_membership_before_update(mapper: object, connection: object, target: Membership) -> None:
+def _validate_membership_before_update(
+    mapper: object, connection: object, target: Membership
+) -> None:
     del mapper, connection
     _validate_membership_tenant(target)

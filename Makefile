@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 .PHONY: install lint typecheck test test-integration build infra-up infra-down
 
 install:
@@ -5,7 +7,7 @@ install:
 	uv sync --directory apps/api --locked
 
 lint:
-	corepack pnpm lint && uv run --directory apps/api ruff check .
+	corepack pnpm lint && uv run --directory apps/api ruff check . && uv run --directory apps/api ruff format --check .
 
 typecheck:
 	corepack pnpm typecheck && uv run --directory apps/api mypy src
@@ -14,8 +16,7 @@ test:
 	corepack pnpm test && uv run --directory apps/api pytest -m "not integration" -q
 
 test-integration:
-	@test -n "$${TEST_DATABASE_URL:-}" || (echo "TEST_DATABASE_URL is required for integration tests" >&2; exit 2)
-	uv run --directory apps/api pytest -m integration -q
+	bash scripts/run-integration-tests.sh
 
 build:
 	corepack pnpm build

@@ -156,10 +156,12 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
     )
 
     organization: Mapped[Organization] = relationship(
-        back_populates="ingestion_jobs", overlaps="project,document_version,candidate_dataset,attempts,lease"
+        back_populates="ingestion_jobs",
+        overlaps="project,document_version,candidate_dataset,attempts,lease",
     )
     project: Mapped[Project] = relationship(
-        back_populates="ingestion_jobs", overlaps="organization,document_version,candidate_dataset,attempts,lease"
+        back_populates="ingestion_jobs",
+        overlaps="organization,document_version,candidate_dataset,attempts,lease",
     )
     document_version: Mapped[DocumentVersion | None] = relationship(
         overlaps="organization,project,attempts,lease"
@@ -168,11 +170,16 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
         overlaps="organization,project,document_version,attempts,lease"
     )
     attempts: Mapped[list[IngestionJobAttempt]] = relationship(
-        back_populates="job", cascade="save-update, merge", passive_deletes=True,
+        back_populates="job",
+        cascade="save-update, merge",
+        passive_deletes=True,
         overlaps="organization,project,document_version,candidate_dataset,lease",
     )
     lease: Mapped[IngestionJobLease | None] = relationship(
-        back_populates="job", uselist=False, cascade="save-update, merge", passive_deletes=True,
+        back_populates="job",
+        uselist=False,
+        cascade="save-update, merge",
+        passive_deletes=True,
         overlaps="organization,project,document_version,candidate_dataset,attempts",
     )
 

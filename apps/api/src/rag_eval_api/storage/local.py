@@ -203,7 +203,9 @@ class LocalBlobStore:
                     pass
             if exc.errno == errno.ELOOP:
                 raise BlobSecurityError("blob root or an existing parent is a symlink") from exc
-            raise BlobSecurityError("blob root or an existing parent is not a safe directory or symlink") from exc
+            raise BlobSecurityError(
+                "blob root or an existing parent is not a safe directory or symlink"
+            ) from exc
 
     def _open_bucket(self, prefix: str, *, create: bool) -> int:
         if not re.fullmatch(r"[a-z2-7]{16}", prefix):

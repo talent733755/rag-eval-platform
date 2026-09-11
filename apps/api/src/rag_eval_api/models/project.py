@@ -63,22 +63,28 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="project", overlaps="organization,document,chunks,document_versions"
     )
     document_chunks: Mapped[list[DocumentChunk]] = relationship(
-        back_populates="project", overlaps="organization,document_version,evidence,chunks,document_chunks"
+        back_populates="project",
+        overlaps="organization,document_version,evidence,chunks,document_chunks",
     )
     candidate_datasets: Mapped[list[CandidateDataset]] = relationship(
-        back_populates="project", overlaps="organization,generation_configs,items,candidate_datasets"
+        back_populates="project",
+        overlaps="organization,generation_configs,items,candidate_datasets",
     )
     candidate_generation_configs: Mapped[list[CandidateGenerationConfig]] = relationship(
-        back_populates="project", overlaps="organization,dataset,candidate_generation_configs,generation_configs"
+        back_populates="project",
+        overlaps="organization,dataset,candidate_generation_configs,generation_configs",
     )
     candidate_dataset_items: Mapped[list[CandidateDatasetItem]] = relationship(
-        back_populates="project", overlaps="organization,dataset,evidence,candidate_dataset_items,items"
+        back_populates="project",
+        overlaps="organization,dataset,evidence,candidate_dataset_items,items",
     )
     candidate_item_evidence: Mapped[list[CandidateItemEvidence]] = relationship(
-        back_populates="project", overlaps="organization,item,chunk,candidate_item_evidence,evidence"
+        back_populates="project",
+        overlaps="organization,item,chunk,candidate_item_evidence,evidence",
     )
     ingestion_jobs: Mapped[list[IngestionJob]] = relationship(
-        back_populates="project", overlaps="organization,document_version,candidate_dataset,attempts,lease,ingestion_jobs"
+        back_populates="project",
+        overlaps="organization,document_version,candidate_dataset,attempts,lease,ingestion_jobs",
     )
     ingestion_job_attempts: Mapped[list[IngestionJobAttempt]] = relationship(
         back_populates="project", overlaps="organization,job,attempts,ingestion_job_attempts"

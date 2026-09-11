@@ -131,8 +131,12 @@ def test_one_organization_keeps_memberships_isolated_between_two_projects(db: Se
         editor_id,
     }
     assert {membership.user_id for membership in second_project.memberships} == {viewer_id}
-    assert all(membership.project_id == first_project.id for membership in first_project.memberships)
-    assert all(membership.project_id == second_project.id for membership in second_project.memberships)
+    assert all(
+        membership.project_id == first_project.id for membership in first_project.memberships
+    )
+    assert all(
+        membership.project_id == second_project.id for membership in second_project.memberships
+    )
 
 
 def test_membership_cannot_pair_project_with_another_organization(db: Session) -> None:

@@ -100,6 +100,9 @@ make test
 make build
 ```
 
+`make test-integration` 会创建临时 Compose 环境，自动启动并等待隔离的
+PostgreSQL/Redis，执行 Alembic `upgrade`/`check` 和 PostgreSQL integration tests，最后清理容器、网络和临时配置。Docker Compose 不可用时会明确以非零状态失败，不会静默跳过；该目标不会修改仓库中的 `.env`。
+
 ### API 客户端与浏览器冒烟
 
 Web API 类型由 FastAPI 的真实 OpenAPI 文档生成，生成工具和版本锁定在

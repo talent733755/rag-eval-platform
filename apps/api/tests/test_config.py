@@ -26,7 +26,10 @@ def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist(
         )
 
 
-@pytest.mark.parametrize("root", ["/", "//", "////", "/./", "/tmp/.."])
+@pytest.mark.parametrize(
+    "root",
+    ["/", "//", "////", "/./", "/tmp/..", "/private/tmp", "/private/tmp/rag-eval"],
+)
 def test_settings_rejects_all_system_root_aliases(root: str) -> None:
     with pytest.raises(ValueError, match="BLOB_ROOT"):
         Settings(_env_file=None, blob_root=root)

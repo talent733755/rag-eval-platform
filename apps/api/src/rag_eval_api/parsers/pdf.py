@@ -17,7 +17,9 @@ from rag_eval_api.parsers.text import _finish_chunks
 class PdfParser:
     parser_version = "pdf-v1"
 
-    def parse(self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits) -> ParseResult:
+    def parse(
+        self, data: bytes, *, filename: str, declared_mime: str | None, limits: ParserLimits
+    ) -> ParseResult:
         del filename, declared_mime
         started = time.monotonic()
         try:

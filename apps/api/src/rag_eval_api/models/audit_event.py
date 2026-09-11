@@ -89,13 +89,17 @@ def _validate_audit_event_tenant(target: AuditEvent) -> None:
 
 
 @event.listens_for(AuditEvent, "before_insert")
-def _validate_audit_event_before_insert(mapper: object, connection: object, target: AuditEvent) -> None:
+def _validate_audit_event_before_insert(
+    mapper: object, connection: object, target: AuditEvent
+) -> None:
     del mapper, connection
     _validate_audit_event_tenant(target)
 
 
 @event.listens_for(AuditEvent, "before_update")
-def _validate_audit_event_before_update(mapper: object, connection: object, target: AuditEvent) -> None:
+def _validate_audit_event_before_update(
+    mapper: object, connection: object, target: AuditEvent
+) -> None:
     del mapper, connection
     _validate_audit_event_tenant(target)
 

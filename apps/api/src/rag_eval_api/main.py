@@ -154,12 +154,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
         del request
         if exc.status_code == 403:
-            return JSONResponse(status_code=403, content=_error_payload(
-                "permission_denied", "You do not have permission to perform this action."
-            ))
+            return JSONResponse(
+                status_code=403,
+                content=_error_payload(
+                    "permission_denied", "You do not have permission to perform this action."
+                ),
+            )
         if isinstance(exc.detail, dict) and "error" in exc.detail:
             return JSONResponse(status_code=exc.status_code, content=exc.detail)
-        error_codes = {404: "not_found", 405: "method_not_allowed", 409: "conflict", 501: "not_implemented"}
+        error_codes = {
+            404: "not_found",
+            405: "method_not_allowed",
+            409: "conflict",
+            501: "not_implemented",
+        }
         messages = {
             404: "Resource not found.",
             405: "Method not allowed.",

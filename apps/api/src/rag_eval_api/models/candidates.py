@@ -85,11 +85,15 @@ class CandidateDataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="candidate_datasets", overlaps="organization,generation_configs,items"
     )
     generation_configs: Mapped[list[CandidateGenerationConfig]] = relationship(
-        back_populates="dataset", cascade="save-update, merge", passive_deletes=True,
+        back_populates="dataset",
+        cascade="save-update, merge",
+        passive_deletes=True,
         overlaps="organization,project,items",
     )
     items: Mapped[list[CandidateDatasetItem]] = relationship(
-        back_populates="dataset", cascade="save-update, merge", passive_deletes=True,
+        back_populates="dataset",
+        cascade="save-update, merge",
+        passive_deletes=True,
         overlaps="organization,project,generation_configs,evidence",
     )
 
@@ -280,7 +284,9 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         viewonly=True, overlaps="organization,project,dataset,evidence,items"
     )
     evidence: Mapped[list[CandidateItemEvidence]] = relationship(
-        back_populates="item", cascade="save-update, merge", passive_deletes=True,
+        back_populates="item",
+        cascade="save-update, merge",
+        passive_deletes=True,
         overlaps="organization,project,dataset,chunk",
     )
 

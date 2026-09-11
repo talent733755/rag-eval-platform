@@ -155,9 +155,9 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("version_number > 0", name="version_number_positive"),
         CheckConstraint("byte_size > 0", name="byte_size_positive"),
         CheckConstraint("length(sha256) = 64", name="sha256_length_64"),
-        CheckConstraint(
-            "sha256 ~ '^[0-9a-f]{64}$'", name="sha256_lower_hex_64"
-        ).ddl_if(dialect="postgresql"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_lower_hex_64").ddl_if(
+            dialect="postgresql"
+        ),
         CheckConstraint("parsed_character_count >= 0", name="parsed_character_count_nonnegative"),
         CheckConstraint("page_count >= 0", name="page_count_nonnegative"),
         Index(
@@ -201,7 +201,9 @@ class DocumentVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="document_versions", overlaps="organization,document,chunks"
     )
     document: Mapped[Document] = relationship(
-        back_populates="versions", foreign_keys=[document_id], overlaps="organization,project,chunks"
+        back_populates="versions",
+        foreign_keys=[document_id],
+        overlaps="organization,project,chunks",
     )
     chunks: Mapped[list[DocumentChunk]] = relationship(
         back_populates="document_version",
@@ -290,9 +292,9 @@ class DocumentChunk(UUIDPrimaryKeyMixin, Base):
         ),
         CheckConstraint("ordinal >= 0", name="ordinal_nonnegative"),
         CheckConstraint("length(content_hash) = 64", name="content_hash_length_64"),
-        CheckConstraint(
-            "content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_lower_hex_64"
-        ).ddl_if(dialect="postgresql"),
+        CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_lower_hex_64").ddl_if(
+            dialect="postgresql"
+        ),
         CheckConstraint("character_count >= 0", name="character_count_nonnegative"),
         CheckConstraint("token_count >= 0", name="token_count_nonnegative"),
         Index(
@@ -328,7 +330,9 @@ class DocumentChunk(UUIDPrimaryKeyMixin, Base):
         back_populates="chunks", overlaps="organization,project,evidence"
     )
     evidence: Mapped[list[CandidateItemEvidence]] = relationship(
-        back_populates="chunk", passive_deletes=True, overlaps="organization,project,document_version,evidence,item"
+        back_populates="chunk",
+        passive_deletes=True,
+        overlaps="organization,project,document_version,evidence,item",
     )
 
 

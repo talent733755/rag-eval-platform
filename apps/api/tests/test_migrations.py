@@ -33,7 +33,9 @@ def test_foundation_offline_sql_covers_audit_and_updated_at_guards(
     assert "CREATE TRIGGER audit_events_truncate_guard" in upgrade_sql
     assert "BEFORE TRUNCATE ON audit_events" in upgrade_sql
     assert "REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_events FROM PUBLIC" in upgrade_sql
-    assert "CREATE OR REPLACE FUNCTION public.rag_eval_prevent_audit_event_mutation()" in upgrade_sql
+    assert (
+        "CREATE OR REPLACE FUNCTION public.rag_eval_prevent_audit_event_mutation()" in upgrade_sql
+    )
     for table in ("organizations", "projects", "memberships"):
         assert f"CREATE TRIGGER {table}_set_updated_at" in upgrade_sql
         assert f"BEFORE UPDATE ON {table}" in upgrade_sql

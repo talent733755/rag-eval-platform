@@ -68,7 +68,9 @@ def test_local_blob_store_enforces_size_checksum_and_cleans_temporary_files(
     assert list(root.rglob("*")) == []
 
 
-def test_local_blob_store_does_not_overwrite_or_follow_existing_storage_path(tmp_path: Path) -> None:
+def test_local_blob_store_does_not_overwrite_or_follow_existing_storage_path(
+    tmp_path: Path,
+) -> None:
     store = LocalBlobStore(tmp_path / "blobs")
     first = store.put(io.BytesIO(b"one"))
     target = store._path_for_key(first.storage_key)
@@ -124,7 +126,7 @@ def test_local_blob_store_rejects_parent_replacement_without_following_symlink(
     outside = tmp_path / "outside"
     outside.mkdir()
     prefix = "a" * 16
-    store._new_key = lambda: f"{prefix}/{ 'b' * 32 }"  # type: ignore[method-assign]
+    store._new_key = lambda: f"{prefix}/{'b' * 32}"  # type: ignore[method-assign]
     (root / prefix).symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(Exception, match="symlink|safe"):

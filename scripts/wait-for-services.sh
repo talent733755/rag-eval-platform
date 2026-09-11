@@ -13,6 +13,31 @@ readonly compose_file="${repo_root}/docker-compose.yml"
 readonly probe_timeout_ms=2000
 readonly cleanup_reserve_ms=250
 
+compose_env_file=""
+compose_project_name=""
+while (($# > 0)); do
+  case "$1" in
+    --compose-env-file)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--compose-env-file requires a path' >&2; exit 2; }
+      compose_env_file="$2"
+      shift 2
+      ;;
+    --project-name)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--project-name requires a value' >&2; exit 2; }
+      compose_project_name="$2"
+      shift 2
+      ;;
+    *)
+      printf 'unknown option: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+compose_args=(--project-directory "$repo_root" --file "$compose_file")
+[[ -n "$compose_env_file" ]] && compose_args+=(--env-file "$compose_env_file")
+[[ -n "$compose_project_name" ]] && compose_args+=(--project-name "$compose_project_name")
+
 clock_ms() {
   python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'
 }
@@ -77,7 +102,7 @@ run_probe() {
 }
 
 postgres_probe() {
-  exec docker compose --project-directory "$repo_root" --file "$compose_file" exec -T postgres sh -c \
+  exec docker compose "${compose_args[@]}" exec -T postgres sh -c \
     'pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"' \
     >/dev/null 2>&1
 }
@@ -87,7 +112,7 @@ postgres_is_ready() {
 }
 
 redis_probe() {
-  exec docker compose --project-directory "$repo_root" --file "$compose_file" exec -T redis sh -c \
+  exec docker compose "${compose_args[@]}" exec -T redis sh -c \
     'test "$(redis-cli ping)" = PONG' \
     >/dev/null 2>&1
 }

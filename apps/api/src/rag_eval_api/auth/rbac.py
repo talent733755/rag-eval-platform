@@ -119,11 +119,16 @@ async def require_organization_admin(
 ) -> RequestActor:
     """Require an administrator membership in the actor's organization."""
 
-    statement = select(Membership.id).where(
-        Membership.organization_id == actor.organization_id,
-        Membership.user_id == actor.user_id,
-        Membership.role == MembershipRole.admin,
-    ).limit(1).with_for_update()
+    statement = (
+        select(Membership.id)
+        .where(
+            Membership.organization_id == actor.organization_id,
+            Membership.user_id == actor.user_id,
+            Membership.role == MembershipRole.admin,
+        )
+        .limit(1)
+        .with_for_update()
+    )
     if (await db_session.execute(statement)).scalar_one_or_none() is None:
         raise permission_denied()
     return actor
@@ -151,7 +156,9 @@ async def recheck_project_admin_and_lock_memberships(
     )
     if actor_membership is None or actor_membership.role is not MembershipRole.admin:
         raise permission_denied()
-    target = next((membership for membership in memberships if membership.id == membership_id), None)
+    target = next(
+        (membership for membership in memberships if membership.id == membership_id), None
+    )
     if target is None:
         raise HTTPException(
             status_code=404,

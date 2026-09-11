@@ -54,7 +54,9 @@ class Seed:
 
 @pytest_asyncio.fixture
 async def api_environment() -> AsyncIterator[
-    tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]]
+    tuple[
+        FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]
+    ]
 ]:
     from rag_eval_api.auth.context import RequestActor, get_current_actor
     from rag_eval_api.main import create_app
@@ -84,7 +86,9 @@ async def api_environment() -> AsyncIterator[
             slug="second-admin-project",
             organization=organization,
         )
-        other_project = Project(name="Other project", slug="other-project", organization=other_organization)
+        other_project = Project(
+            name="Other project", slug="other-project", organization=other_organization
+        )
         admin_membership = Membership(
             organization=organization,
             project=project,
@@ -180,7 +184,9 @@ async def api_environment() -> AsyncIterator[
 
 @pytest.mark.asyncio
 async def test_visible_projects_are_isolated_and_viewers_can_read_members(
-    api_environment: tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]],
+    api_environment: tuple[
+        FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]
+    ],
 ) -> None:
     _, client, seed, set_actor, _ = api_environment
     set_actor(VIEWER_ID)
@@ -209,7 +215,9 @@ async def test_visible_projects_are_isolated_and_viewers_can_read_members(
 
 @pytest.mark.asyncio
 async def test_nonmember_gets_same_permission_error_for_existing_and_missing_project(
-    api_environment: tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]],
+    api_environment: tuple[
+        FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]
+    ],
 ) -> None:
     _, client, seed, set_actor, _ = api_environment
     set_actor(ACTOR_ID)
@@ -223,7 +231,9 @@ async def test_nonmember_gets_same_permission_error_for_existing_and_missing_pro
 
 @pytest.mark.asyncio
 async def test_project_creation_is_admin_only_and_audited(
-    api_environment: tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]],
+    api_environment: tuple[
+        FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]
+    ],
 ) -> None:
     _, client, seed, set_actor, session_factory = api_environment
     set_actor(EDITOR_ID)
@@ -315,12 +325,16 @@ async def test_final_project_admin_cannot_demote_or_delete_self(
     )
 
     assert demotion.status_code == deletion.status_code == 409
-    assert demotion.json() == deletion.json() == {
-        "error": {
-            "code": "conflict",
-            "message": "A project must retain at least one administrator.",
+    assert (
+        demotion.json()
+        == deletion.json()
+        == {
+            "error": {
+                "code": "conflict",
+                "message": "A project must retain at least one administrator.",
+            }
         }
-    }
+    )
     async with session_factory() as session:
         membership = await session.get(Membership, seed.admin_membership_id)
         assert membership is not None
@@ -329,7 +343,9 @@ async def test_final_project_admin_cannot_demote_or_delete_self(
             await session.execute(
                 select(AuditEvent).where(
                     AuditEvent.project_id == seed.project_id,
-                    AuditEvent.action.in_(["project.member.role_changed", "project.member.removed"]),
+                    AuditEvent.action.in_(
+                        ["project.member.role_changed", "project.member.removed"]
+                    ),
                 )
             )
         ).scalars().all() == []
@@ -365,7 +381,9 @@ async def test_admin_from_another_organization_cannot_access_project(
     assert [item["id"] for item in visible.json()] == [str(seed.other_project_id)]
     assert detail.status_code == 403
     assert invite.status_code == update.status_code == remove.status_code == 403
-    assert detail.json() == invite.json() == update.json() == remove.json() == PERMISSION_DENIED_BODY
+    assert (
+        detail.json() == invite.json() == update.json() == remove.json() == PERMISSION_DENIED_BODY
+    )
 
 
 @pytest.mark.asyncio
@@ -390,18 +408,20 @@ async def test_duplicate_project_slug_returns_conflict_without_partial_mutation(
     assert response.json() == CONFLICT_BODY
     async with session_factory() as session:
         projects = (
-            await session.execute(
-                select(Project).where(
-                    Project.organization_id == seed.organization_id,
-                    Project.slug == "main",
+            (
+                await session.execute(
+                    select(Project).where(
+                        Project.organization_id == seed.organization_id,
+                        Project.slug == "main",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(projects) == 1
         assert (
-            await session.execute(
-                select(AuditEvent).where(AuditEvent.action == "project.created")
-            )
+            await session.execute(select(AuditEvent).where(AuditEvent.action == "project.created"))
         ).scalars().all() == []
 
 
@@ -461,10 +481,14 @@ async def test_audit_integrity_failure_rolls_back_project_creation(
             await session.execute(select(Project).where(Project.slug == "rolled-back"))
         ).scalar_one_or_none() is None
         assert (
-            await session.execute(
-                select(Membership).where(Membership.project_id == seed.project_id)
+            (
+                await session.execute(
+                    select(Membership).where(Membership.project_id == seed.project_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
 
 @pytest.mark.asyncio
@@ -616,7 +640,9 @@ async def test_remove_member_role_matrix(
 
 @pytest.mark.asyncio
 async def test_member_mutation_validation_returns_consistent_422_error(
-    api_environment: tuple[FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]],
+    api_environment: tuple[
+        FastAPI, httpx.AsyncClient, Seed, Callable[[UUID], None], async_sessionmaker[AsyncSession]
+    ],
 ) -> None:
     _, client, seed, set_actor, _ = api_environment
     set_actor(ADMIN_ID)
@@ -650,9 +676,7 @@ async def test_missing_route_returns_consistent_404_error(
     response = await client.get("/api/unknown")
 
     assert response.status_code == 404
-    assert response.json() == {
-        "error": {"code": "not_found", "message": "Resource not found."}
-    }
+    assert response.json() == {"error": {"code": "not_found", "message": "Resource not found."}}
 
 
 @pytest.mark.asyncio
@@ -662,11 +686,9 @@ async def test_production_auth_boundary_returns_501_without_actor_override(
     from rag_eval_api.main import create_app
 
     # This test exercises the auth boundary, not the host's sandbox capability.
+    monkeypatch.setattr("rag_eval_api.parsers.runner.restricted_sandbox_available", lambda: True)
     monkeypatch.setattr(
-        "rag_eval_api.parsers.runner.restricted_sandbox_available", lambda: True
-    )
-    monkeypatch.setattr(
-        "rag_eval_api.parsers.runner.sandbox_executable_available", lambda _: True
+        "rag_eval_api.parsers.runner.sandbox_command_available", lambda _executable, _args: True
     )
     settings = Settings(
         database_url="postgresql+asyncpg://rag_eval:real-password@db.example/rag_eval",

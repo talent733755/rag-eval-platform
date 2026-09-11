@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import io
 import os
+import pickle
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -17,7 +20,12 @@ from rag_eval_api.parsers.errors import (
 )
 from rag_eval_api.parsers.models import ParserLimits
 from rag_eval_api.parsers.registry import ParserRegistry
-from rag_eval_api.parsers.runner import ParserRunner, ParserSandboxUnavailable, ParserTimeout
+from rag_eval_api.parsers.runner import (
+    ParserRunner,
+    ParserSandboxUnavailable,
+    ParserTimeout,
+    sandbox_command_available,
+)
 
 
 def _docx_bytes() -> bytes:
@@ -75,22 +83,31 @@ def test_registry_parses_txt_markdown_and_docx_with_deterministic_locations() ->
         declared_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
-    assert [chunk.content for chunk in text.chunks] == ["Heading", "First paragraph.", "Second paragraph."]
+    assert [chunk.content for chunk in text.chunks] == [
+        "Heading",
+        "First paragraph.",
+        "Second paragraph.",
+    ]
     assert text.chunks[0].source_location == {"paragraph": 0}
     assert markdown.chunks[0].heading == "Heading"
     assert markdown.chunks[0].source_location["line"] == 1
     assert docx.chunks[0].heading == "Safety"
     assert docx.chunks[1].source_location == {"paragraph": 1}
-    assert text.content_hash == registry.parse(
-        io.BytesIO(b"Heading\n\nFirst paragraph.\n\nSecond paragraph."),
-        filename="guide.txt",
-        declared_mime="text/plain",
-    ).content_hash
+    assert (
+        text.content_hash
+        == registry.parse(
+            io.BytesIO(b"Heading\n\nFirst paragraph.\n\nSecond paragraph."),
+            filename="guide.txt",
+            declared_mime="text/plain",
+        ).content_hash
+    )
 
 
 def test_registry_parses_pdf_and_reports_page_locations() -> None:
     pdf = _pdf_bytes()
-    result = ParserRegistry().parse(io.BytesIO(pdf), filename="guide.pdf", declared_mime="application/pdf")
+    result = ParserRegistry().parse(
+        io.BytesIO(pdf), filename="guide.pdf", declared_mime="application/pdf"
+    )
 
     assert result.page_count == 1
     assert result.chunks[0].source_location == {"page": 1}
@@ -188,6 +205,19 @@ def test_text_parser_rejects_single_line_over_character_limit() -> None:
             declared_mime="text/plain",
             limits=ParserLimits(max_normalized_characters=200_000),
         )
+
+
+def test_text_parser_handles_multibyte_utf8_split_at_decode_chunk_boundary() -> None:
+    content = ("界" * 65_535) + "🙂" + ("界" * 10)
+    result = ParserRegistry(isolated=False).parse(
+        io.BytesIO(content.encode("utf-8")),
+        filename="multibyte.txt",
+        declared_mime="text/plain",
+        limits=ParserLimits(max_normalized_characters=65_546),
+    )
+
+    assert "🙂" in "".join(chunk.content for chunk in result.chunks)
+    assert sum(chunk.character_count for chunk in result.chunks) == len(content)
     with pytest.raises(MalformedDocumentError):
         ParserRegistry().parse(
             io.BytesIO(b"%PDF-1.7"), filename="truncated.pdf", declared_mime="application/pdf"
@@ -285,14 +315,20 @@ def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
     tmp_path: Path,
 ) -> None:
     pid_file = tmp_path / "sleep.pid"
-    wrapper = tmp_path / "slow-sandbox"
-    _write_executable(
-        wrapper,
-        "#!/bin/sh\n"
-        f"echo $$ > '{pid_file}'\n"
-        "sleep 30\n",
+    wrapper = tmp_path / "bwrap"
+    wrapper.write_text(
+        "#!" + sys.executable + "\n"
+        "import pathlib, subprocess\n"
+        f"pid_file = pathlib.Path({str(pid_file)!r})\n"
+        "child = subprocess.Popen(['sleep', '30'])\n"
+        "pid_file.write_text(str(child.pid))\n"
+        "child.wait()\n"
     )
-    runner = ParserRunner(sandbox_executable=str(wrapper))
+    wrapper.chmod(0o700)
+    runner = ParserRunner(
+        sandbox_executable=str(wrapper),
+        sandbox_args=("--die-with-parent", "--unshare-net"),
+    )
 
     with pytest.raises(ParserTimeout):
         runner.parse_bytes(
@@ -304,8 +340,12 @@ def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
             timeout_seconds=2.0,
         )
 
+    deadline = time.monotonic() + 2
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert pid_file.exists()
     child_pid = int(pid_file.read_text())
-    for _ in range(20):
+    for _ in range(40):
         try:
             os.kill(child_pid, 0)
         except ProcessLookupError:
@@ -319,11 +359,14 @@ def test_parser_runner_terminates_sleeping_sandbox_process_without_orphan(
 def test_parser_runner_maps_eof_or_crashed_child_to_sandbox_error(
     tmp_path: Path, exit_code: int
 ) -> None:
-    wrapper = tmp_path / "crashing-sandbox"
+    wrapper = tmp_path / "bwrap"
     _write_executable(wrapper, f"#!/bin/sh\nexit {exit_code}\n")
 
     with pytest.raises(ParserSandboxUnavailable):
-        ParserRunner(sandbox_executable=str(wrapper)).parse_bytes(
+        ParserRunner(
+            sandbox_executable=str(wrapper),
+            sandbox_args=("--die-with-parent", "--unshare-net"),
+        ).parse_bytes(
             _pdf_bytes(),
             suffix=".pdf",
             filename="crashed.pdf",
@@ -341,3 +384,45 @@ def test_parser_runner_requires_os_sandbox_for_strict_mode() -> None:
             declared_mime="application/pdf",
             limits=ParserLimits(),
         )
+
+
+def test_parser_runner_rejects_pickle_payload_without_executing_it(tmp_path: Path) -> None:
+    marker = tmp_path / "executed"
+
+    class MaliciousPayload:
+        def __reduce__(self) -> tuple[object, tuple[str]]:
+            return (os.system, (f"touch {marker}",))
+
+    encoded = base64.b64encode(pickle.dumps(MaliciousPayload())).decode("ascii")
+    wrapper = tmp_path / "bwrap"
+    wrapper.write_text(
+        "#!" + sys.executable + "\n"
+        "import base64, sys\n"
+        f"sys.stdout.buffer.write(base64.b64decode({encoded!r}))\n"
+    )
+    wrapper.chmod(0o700)
+
+    with pytest.raises(ParserSandboxUnavailable):
+        ParserRunner(
+            sandbox_executable=str(wrapper),
+            sandbox_args=("--die-with-parent", "--unshare-net"),
+        ).parse_bytes(
+            _pdf_bytes(),
+            suffix=".pdf",
+            filename="malicious.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(),
+        )
+    assert not marker.exists()
+
+
+def test_parser_runner_rejects_sandbox_commands_without_required_flags(tmp_path: Path) -> None:
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text("#!/bin/sh\nexit 0\n")
+    bwrap.chmod(0o700)
+    assert not sandbox_command_available(str(bwrap), ("--die-with-parent",))
+    assert sandbox_command_available(str(bwrap), ("--die-with-parent", "--unshare-net"))
+    env = tmp_path / "env"
+    env.write_text("#!/bin/sh\nexit 0\n")
+    env.chmod(0o700)
+    assert not sandbox_command_available(str(env), ("--unshare-net", "--die-with-parent"))

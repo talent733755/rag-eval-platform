@@ -53,7 +53,9 @@ class ParserLimits:
     def __post_init__(self) -> None:
         for name, upper_bound in self._SAFE_UPPER_BOUNDS.items():
             value = getattr(self, name)
-            if isinstance(upper_bound, int) and (not isinstance(value, int) or isinstance(value, bool)):
+            if isinstance(upper_bound, int) and (
+                not isinstance(value, int) or isinstance(value, bool)
+            ):
                 raise ValueError(f"{name} must be an integer")
             if isinstance(upper_bound, float) and not isinstance(value, int | float):
                 raise ValueError(f"{name} must be numeric")

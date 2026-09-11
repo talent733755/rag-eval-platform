@@ -71,7 +71,8 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="organization", overlaps="project,item,chunk,evidence"
     )
     ingestion_jobs: Mapped[list[IngestionJob]] = relationship(
-        back_populates="organization", overlaps="project,document_version,candidate_dataset,attempts,lease"
+        back_populates="organization",
+        overlaps="project,document_version,candidate_dataset,attempts,lease",
     )
     ingestion_job_attempts: Mapped[list[IngestionJobAttempt]] = relationship(
         back_populates="organization", overlaps="project,job,attempts"
