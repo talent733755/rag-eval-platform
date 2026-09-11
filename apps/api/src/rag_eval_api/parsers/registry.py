@@ -38,7 +38,10 @@ class ParserRegistry:
             ".markdown": MarkdownParser(),
             ".txt": TextParser(),
         }
-        self._runner = runner if runner is not None else (ParserRunner() if isolated else None)
+        # PDF/DOCX must never bypass the process boundary. ``ParserRunner``
+        # without an external sandbox is a development fallback, not direct
+        # in-process parsing; Markdown/TXT remain available for unit tests.
+        self._runner = runner if runner is not None else ParserRunner()
 
     def parse(
         self,
@@ -67,7 +70,7 @@ class ParserRegistry:
         data = read_bounded(source, max_bytes=effective_limits.max_input_bytes)
         self._validate_signature(suffix, data)
         try:
-            if self._runner is not None and suffix in {".pdf", ".docx"}:
+            if suffix in {".pdf", ".docx"}:
                 return self._runner.parse_bytes(
                     data,
                     suffix=suffix,

@@ -52,11 +52,25 @@ _ERROR_CODES = frozenset(
         "parser_sandbox_unavailable",
     }
 )
-_MAX_CHILD_STDOUT_BYTES = 1 * 1024 * 1024
-_MAX_CHILD_STDERR_BYTES = 1 * 1024 * 1024
+_MIN_CHILD_OUTPUT_BYTES = 1 * 1024 * 1024
+_OUTPUT_ENVELOPE_BYTES = 64 * 1024
 _SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
     "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
     "unshare": frozenset({"/usr/bin/unshare", "/bin/unshare", "/usr/local/bin/unshare"}),
+}
+_SANDBOX_TEMPLATES: Mapping[str, tuple[str, ...]] = {
+    "bwrap": ("--unshare-net", "--die-with-parent", "--new-session"),
+    "unshare": (
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--uts",
+        "--ipc",
+        "--net",
+        "--pid",
+        "--fork",
+        "--kill-child",
+    ),
 }
 
 
@@ -131,12 +145,15 @@ class _ErrorEnvelope(_StrictModel):
 def restricted_sandbox_available() -> bool:
     """Whether this runtime can enforce CPU and address-space limits."""
 
+    return _resource_limits_supported() and os.geteuid() != 0
+
+
+def _resource_limits_supported() -> bool:
     try:
         import resource
 
         return (
             os.name == "posix"
-            and os.geteuid() != 0
             and sys.platform.startswith("linux")
             and hasattr(resource, "RLIMIT_CPU")
             and hasattr(resource, "RLIMIT_AS")
@@ -166,12 +183,51 @@ def sandbox_command_available(executable: str | None, args: Sequence[str]) -> bo
         or not os.access(resolved, os.X_OK)
     ):
         return False
-    required_flags = (
-        {"--unshare-net", "--die-with-parent"}
-        if command_name == "bwrap"
-        else {"--net", "--fork", "--kill-child"}
+    if tuple(args) != _SANDBOX_TEMPLATES.get(command_name, ()):
+        return False
+    return _probe_sandbox_template(resolved, args)
+
+
+def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
+    """Execute the exact profile against a harmless command before accepting it."""
+
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(
+            [executable, *args, "--", "/bin/true"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        process.wait(timeout=2.0)
+        return process.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    finally:
+        if process is not None and process.poll() is None:
+            _kill_process_group(process)
+
+
+def _child_output_limit(limits: ParserLimits) -> int:
+    return max(
+        _MIN_CHILD_OUTPUT_BYTES,
+        limits.max_normalized_characters * 4 + _OUTPUT_ENVELOPE_BYTES,
     )
-    return required_flags <= set(args)
+
+
+def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
+        process.kill()
+    try:
+        process.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 class ParserRunner:
@@ -217,6 +273,8 @@ class ParserRunner:
         limits: ParserLimits,
         timeout_seconds: float | None = None,
     ) -> ParseResult:
+        if len(data) > limits.max_input_bytes:
+            raise ParserLimitExceeded("input bytes exceed the configured limit")
         timeout = self.default_timeout_seconds if timeout_seconds is None else timeout_seconds
         if timeout <= 0 or not math.isfinite(timeout):
             raise ParserTimeout("parser exceeded its hard timeout")
@@ -251,7 +309,10 @@ class ParserRunner:
                 start_new_session=True,
             )
             output, _ = self._communicate_bounded(
-                process, _json_bytes(request.model_dump(mode="json")), timeout
+                process,
+                _json_bytes(request.model_dump(mode="json")),
+                timeout,
+                _child_output_limit(limits),
             )
         except ParserTimeout:
             if process is not None:
@@ -283,6 +344,7 @@ class ParserRunner:
         process: subprocess.Popen[bytes],
         request: bytes,
         timeout: float,
+        output_limit: int,
     ) -> tuple[bytes, bytes]:
         """Exchange one bounded request without unbounded pipe buffering."""
 
@@ -316,12 +378,12 @@ class ParserRunner:
 
         stdout_thread = threading.Thread(
             target=drain,
-            args=(process.stdout, stdout_buffer, _MAX_CHILD_STDOUT_BYTES),
+            args=(process.stdout, stdout_buffer, output_limit),
             daemon=True,
         )
         stderr_thread = threading.Thread(
             target=drain,
-            args=(process.stderr, stderr_buffer, _MAX_CHILD_STDERR_BYTES),
+            args=(process.stderr, stderr_buffer, output_limit),
             daemon=True,
         )
         input_thread = threading.Thread(target=write_request, args=(process.stdin,), daemon=True)
@@ -355,7 +417,7 @@ class ParserRunner:
         child = [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
         if self.sandbox_executable is None:
             return child
-        return [self.sandbox_executable, *self.sandbox_args, *child]
+        return [self.sandbox_executable, *self.sandbox_args, "--", *child]
 
     @staticmethod
     def _terminate(process: subprocess.Popen[bytes], *, force_group: bool = False) -> None:
@@ -377,7 +439,10 @@ class ParserRunner:
                     pass
             else:
                 process.kill()
-            process.wait(timeout=0.5)
+            try:
+                process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                _kill_process_group(process)
 
 
 def _child_result(request: _RequestEnvelope) -> _OkEnvelope | _ErrorEnvelope:
@@ -399,6 +464,10 @@ def _child_result(request: _RequestEnvelope) -> _OkEnvelope | _ErrorEnvelope:
     except ParserError as exc:
         code = "security_violation" if isinstance(exc, ParserSecurityError) else exc.code
         return _error_envelope(code, str(exc))
+    except MemoryError:
+        return _error_envelope(
+            "parser_sandbox_unavailable", "parser process exceeded its memory limit"
+        )
     except (binascii.Error, ValueError, TypeError):
         return _error_envelope("parser_sandbox_unavailable", "parser request was invalid")
     except BaseException:
@@ -416,10 +485,13 @@ def _configure_child_sandbox(
             return
         raise ParserSandboxUnavailable("process resource limits are unavailable")
 
+    if sandbox_enabled and not _resource_limits_supported():
+        raise ParserSandboxUnavailable("process resource limits are unavailable")
     cpu_seconds = max(1, math.ceil(timeout_seconds) + 1)
     try:
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-        if restricted_sandbox_available():
+        if hasattr(resource, "RLIMIT_CPU"):
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+        if hasattr(resource, "RLIMIT_AS") and _resource_limits_supported():
             memory_bytes = min(
                 max(1024 * 1024 * 1024, limits.max_input_bytes * 8),
                 2 * 1024 * 1024 * 1024,

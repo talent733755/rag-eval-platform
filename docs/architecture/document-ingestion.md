@@ -66,14 +66,29 @@ executable/argument profile (such as approved `unshare`/`bwrap`) plus CPU and
 memory limit support. The executable must resolve to the root-owned,
 non-group/other-writable absolute-path allowlist for supported `bwrap` and
 `unshare` binaries; symlink aliases, `/usr/bin/env`, basename matches, and
-custom launchers are rejected. Only profiles with explicit network-isolation
-and parent-death flags are accepted. Child stdout/stderr are hard-limited and
-the complete process group is killed on timeout, malformed output, EOF, crash,
-or output overflow. The parent/child protocol is strict UTF-8 JSON, never
+custom launchers are rejected. The accepted token templates are exact and
+ordered: `bwrap --unshare-net --die-with-parent --new-session -- <parser argv>`
+or `unshare --user --map-root-user --mount --uts --ipc --net --pid --fork
+--kill-child -- <parser argv>`. The runner probes the selected template with a
+harmless command before accepting it; parser argv cannot be inserted before
+the separator. Child stdout/stderr are hard-limited and the complete process
+group is killed on timeout, malformed output, EOF, crash, or output overflow.
+The parent/child protocol is strict UTF-8 JSON, never
 pickle or another executable object format. Timeout, malformed output, EOF, and
 crash outcomes retain the public `parse_timeout` and
 `parser_sandbox_unavailable` error codes. The current parser runner is not a
 worker process and does not complete upload-to-parse workflow.
+
+PDF/DOCX are always dispatched through `ParserRunner`; the direct parser
+classes are not an ingestion entrypoint. `pypdf` may materialize decoded PDF
+streams before a parser-level byte check, so the runner's input cap, child
+`RLIMIT_AS`/`RLIMIT_CPU` (when supported), output cap, and parent hard timeout
+are the required resource boundary. A platform that cannot provide the
+required strict limits fails closed instead of claiming streaming protection.
+The parent starts a new process group and cleans that group on failure; it does
+not claim it can clean up a malicious descendant that deliberately calls
+`setsid` outside the group. The supported sandbox templates' parent-death
+behavior is the required defense for normal descendants.
 
 ## Logical flow
 

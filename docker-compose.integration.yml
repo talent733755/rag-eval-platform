@@ -1,0 +1,8 @@
+services:
+  postgres:
+    profiles:
+      - integration
+
+  redis:
+    profiles:
+      - integration

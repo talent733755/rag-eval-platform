@@ -108,13 +108,16 @@ limits where available and Python-level socket denial; this fallback is not OS
 network isolation. Production and `PARSER_REQUIRE_RESOURCE_LIMITS=true` require
 an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
 non-root, no-network, CPU, and memory limits. Only supported `bwrap` profiles
-with `--unshare-net` and `--die-with-parent`, or supported `unshare` profiles
-with `--net`, `--fork`, and `--kill-child`, are accepted; `/usr/bin/env` and
-other command wrappers are not sandboxes. The executable must be an absolute
-real path in the root-owned, non-group/other-writable allowlist; basename
-matches and symlink aliases are rejected. Child stdout and stderr are each
-hard-limited; overflow maps to `parser_sandbox_unavailable` after the complete
-process group is terminated. If those capabilities are
+only these exact ordered templates are accepted: `bwrap
+--unshare-net --die-with-parent --new-session -- <parser argv>`, or `unshare
+--user --map-root-user --mount --uts --ipc --net --pid --fork --kill-child
+-- <parser argv>`. `/usr/bin/env`, extra flags, reordered flags, and parser
+arguments before the separator are rejected. The executable must be an
+absolute real path in the root-owned, non-group/other-writable allowlist;
+basename matches and symlink aliases are rejected, and the exact template is
+probed before use. Child stdout and stderr are each hard-limited; overflow
+maps to `parser_sandbox_unavailable` after the complete process group is
+terminated. If those capabilities are
 unavailable, settings fail closed. The child protocol is strict UTF-8 JSON with
 an `{"kind":"ok","result":...}` or
 `{"kind":"error","code":...,"message":...}` envelope. The parent never
@@ -123,6 +126,16 @@ UTF-8, EOF, or crashed output maps to `parser_sandbox_unavailable`. Hard
 timeouts terminate the process group and map to `parse_timeout`. This runner
 is the parser boundary for the next worker phase; it does not itself implement
 a worker, upload route, or upload-to-parse workflow.
+
+PDF and DOCX always use this runner, even when text parsers are used in a
+non-isolated unit-test mode. Because `pypdf` can materialize a decoded stream
+before its parser-level check, safety depends on the runner input cap, child
+`RLIMIT_AS`/`RLIMIT_CPU` where supported, bounded output, and parent hard
+timeout. Unsupported resource controls fail closed in strict mode; no
+streaming-decompression guarantee is made for direct parser classes.
+The parent cleans its process group but does not claim to recover descendants
+that deliberately call `setsid`; the supported sandbox parent-death behavior
+is the required defense for normal descendants.
 
 ## Tenant and resource identity
 

@@ -9,12 +9,13 @@ fi
 
 readonly script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly repo_root="$(CDPATH= cd -- "${script_dir}/.." && pwd -P)"
-readonly compose_file="${repo_root}/docker-compose.yml"
 readonly probe_timeout_ms=2000
 readonly cleanup_reserve_ms=250
 
 compose_env_file=""
 compose_project_name=""
+compose_files=("${repo_root}/docker-compose.yml")
+compose_profiles=()
 while (($# > 0)); do
   case "$1" in
     --compose-env-file)
@@ -27,6 +28,16 @@ while (($# > 0)); do
       compose_project_name="$2"
       shift 2
       ;;
+    --compose-file)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--compose-file requires a path' >&2; exit 2; }
+      compose_files+=("$2")
+      shift 2
+      ;;
+    --profile)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--profile requires a value' >&2; exit 2; }
+      compose_profiles+=("$2")
+      shift 2
+      ;;
     *)
       printf 'unknown option: %s\n' "$1" >&2
       exit 2
@@ -34,7 +45,13 @@ while (($# > 0)); do
   esac
 done
 
-compose_args=(--project-directory "$repo_root" --file "$compose_file")
+compose_args=(--project-directory "$repo_root")
+for compose_file in "${compose_files[@]}"; do
+  compose_args+=(--file "$compose_file")
+done
+for profile in "${compose_profiles[@]}"; do
+  compose_args+=(--profile "$profile")
+done
 [[ -n "$compose_env_file" ]] && compose_args+=(--env-file "$compose_env_file")
 [[ -n "$compose_project_name" ]] && compose_args+=(--project-name "$compose_project_name")
 

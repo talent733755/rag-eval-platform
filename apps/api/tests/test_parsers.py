@@ -8,10 +8,12 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from docx import Document as DocxDocument
 
+import rag_eval_api.parsers.runner as runner_module
 from rag_eval_api.parsers.docx import DocxParser
 from rag_eval_api.parsers.errors import (
     MalformedDocumentError,
@@ -308,6 +310,17 @@ def test_parser_runner_enforces_hard_timeout_before_starting_work() -> None:
         )
 
 
+def test_parser_runner_rejects_input_above_parser_limit_before_spawning() -> None:
+    with pytest.raises(ParserLimitExceeded, match="input bytes"):
+        ParserRunner().parse_bytes(
+            b"x" * 11,
+            suffix=".pdf",
+            filename="oversized.pdf",
+            declared_mime="application/pdf",
+            limits=ParserLimits(max_input_bytes=10),
+        )
+
+
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content)
     path.chmod(0o700)
@@ -442,6 +455,126 @@ def test_parser_runner_rejects_sandbox_commands_without_required_flags(tmp_path:
     env.write_text("#!/bin/sh\nexit 0\n")
     env.chmod(0o700)
     assert not sandbox_command_available(str(env), ("--unshare-net", "--die-with-parent"))
+
+
+def test_sandbox_template_requires_exact_order_and_rejects_extra_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bwrap = tmp_path / "bwrap"
+    _write_executable(bwrap, "#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(
+        runner_module,
+        "_SANDBOX_PATHS",
+        {"bwrap": frozenset({str(bwrap)})},
+    )
+    monkeypatch.setattr(
+        runner_module.os,
+        "stat",
+        lambda *_args, **_kwargs: SimpleNamespace(st_uid=0, st_mode=0o100755),
+    )
+
+    exact = ("--unshare-net", "--die-with-parent", "--new-session")
+    assert sandbox_command_available(str(bwrap), exact)
+    assert not sandbox_command_available(str(bwrap), (*exact, "--ro-bind", "/", "/"))
+    assert not sandbox_command_available(str(bwrap), tuple(reversed(exact)))
+
+
+def test_unshare_template_requires_exact_order_and_rejects_bwrap_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unshare = tmp_path / "unshare"
+    _write_executable(unshare, "#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(
+        runner_module,
+        "_SANDBOX_PATHS",
+        {"unshare": frozenset({str(unshare)})},
+    )
+    monkeypatch.setattr(
+        runner_module.os,
+        "stat",
+        lambda *_args, **_kwargs: SimpleNamespace(st_uid=0, st_mode=0o100755),
+    )
+
+    exact = runner_module._SANDBOX_TEMPLATES["unshare"]
+    assert sandbox_command_available(str(unshare), exact)
+    assert not sandbox_command_available(str(unshare), (*exact, "--die-with-parent"))
+    assert not sandbox_command_available(str(unshare), ("--net", *exact[1:]))
+
+
+def test_parser_runner_places_parser_argv_after_sandbox_separator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bwrap = tmp_path / "bwrap"
+    _write_executable(bwrap, "#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(
+        runner_module,
+        "sandbox_command_available",
+        lambda _executable, _args: True,
+    )
+    command = ParserRunner(
+        sandbox_executable=str(bwrap),
+        sandbox_args=("--unshare-net", "--die-with-parent", "--new-session"),
+    )._command()
+    assert command[:5] == [
+        str(bwrap),
+        "--unshare-net",
+        "--die-with-parent",
+        "--new-session",
+        "--",
+    ]
+    assert command[5:] == [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
+
+
+def test_parser_runner_output_limit_scales_with_normalized_character_limit() -> None:
+    assert (
+        runner_module._child_output_limit(ParserLimits(max_normalized_characters=1))
+        == 1 * 1024 * 1024
+    )
+    assert (
+        runner_module._child_output_limit(ParserLimits(max_normalized_characters=500_000))
+        >= 2_048_576
+    )
+
+
+def test_child_sandbox_applies_cpu_and_address_space_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import resource
+
+    calls: list[tuple[int, tuple[int, int]]] = []
+    monkeypatch.setattr(
+        resource,
+        "setrlimit",
+        lambda resource_kind, values: calls.append((resource_kind, values)),
+    )
+    monkeypatch.setattr(runner_module, "_resource_limits_supported", lambda: True)
+
+    runner_module._configure_child_sandbox(
+        ParserLimits(max_input_bytes=10 * 1024 * 1024),
+        2.0,
+        sandbox_enabled=True,
+    )
+
+    assert {resource_kind for resource_kind, _ in calls} == {
+        resource.RLIMIT_CPU,
+        resource.RLIMIT_AS,
+    }
+
+
+def test_registry_keeps_pdf_and_docx_on_runner_even_when_text_is_unisolated() -> None:
+    class StubRunner:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def parse_bytes(self, data: bytes, **kwargs: object) -> object:
+            del data
+            self.calls.append(str(kwargs["suffix"]))
+            return object()
+
+    runner = StubRunner()
+    registry = ParserRegistry(isolated=False, runner=runner)  # type: ignore[arg-type]
+    registry.parse(io.BytesIO(_pdf_bytes()), filename="safe.pdf", declared_mime="application/pdf")
+    assert runner.calls == [".pdf"]
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])

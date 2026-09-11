@@ -40,6 +40,9 @@ jobs:
       - name: Run API lint
         run: uv run --directory apps/api ruff check .
 
+      - name: Check API formatting
+        run: uv run --directory apps/api ruff format --check .
+
       - name: Run API typecheck
         run: uv run --directory apps/api mypy src
 
@@ -122,48 +125,11 @@ jobs:
       - name: Install API dependencies
         run: uv sync --directory apps/api --locked
 
-      - name: Configure local services
+      - name: Configure integration base environment
         run: cp .env.example .env
 
-      - name: Start PostgreSQL and Redis
-        run: make infra-up
-
-      - name: Wait for local services
-        run: bash scripts/wait-for-services.sh
-
-      - name: Apply database migrations
-        run: uv run --directory apps/api alembic upgrade head
-
-      - name: Run PostgreSQL integration tests
-        run: TEST_DATABASE_URL=postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval uv run --directory apps/api pytest -m integration -q
-
-      - name: Start API
-        run: |
-          uv run --directory apps/api uvicorn rag_eval_api.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
-          echo $! > api.pid
-
-      - name: Probe API contract and health
-        run: |
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8000/health/live >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          curl --fail --silent http://127.0.0.1:8000/health/live
-          curl --fail --silent http://127.0.0.1:8000/openapi.json >/dev/null
-
-      - name: Show API logs on failure
-        if: failure()
-        run: test ! -f api.log || tail -n 200 api.log
-
-      - name: Stop API
-        if: always()
-        run: test ! -f api.pid || kill "$(cat api.pid)" || true
-
-      - name: Stop local services
-        if: always()
-        run: docker compose down -v
+      - name: Run PostgreSQL integration gate
+        run: make test-integration
 
   playwright-smoke:
     name: Playwright admin shell smoke
