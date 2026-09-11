@@ -19,13 +19,17 @@ from rag_eval_api.parsers.runner import (
     MAX_MAX_PARSER_OUTPUT_BYTES,
     ParserRunner,
 )
+from rag_eval_api.parsers.runner_limits import (
+    DEFAULT_MAX_PARSER_INPUT_BYTES,
+    MAX_MAX_PARSER_INPUT_BYTES,
+)
 
 APP_ENV_DEVELOPMENT: Literal["development"] = "development"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://rag_eval:change-me@localhost:5432/rag_eval"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_SECRET_KEY = "development-only-secret"
 DEFAULT_BLOB_ROOT = "/var/lib/rag-eval/blobs"
-DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+DEFAULT_MAX_UPLOAD_BYTES = DEFAULT_MAX_PARSER_INPUT_BYTES
 DEFAULT_MAX_PARSE_PAGES = 10_000
 DEFAULT_MAX_NORMALIZED_CHARACTERS = 200_000
 LOGGER_NAME = "rag_eval_api.request"
@@ -86,7 +90,7 @@ class Settings(BaseSettings):
         int,
         Field(
             ge=1,
-            le=500 * 1024 * 1024,
+            le=MAX_MAX_PARSER_INPUT_BYTES,
             validation_alias=AliasChoices("MAX_UPLOAD_BYTES", "max_upload_bytes"),
         ),
     ] = DEFAULT_MAX_UPLOAD_BYTES

@@ -109,7 +109,7 @@ limits where available and Python-level socket denial; this fallback is not OS
 network isolation. Production and `PARSER_REQUIRE_RESOURCE_LIMITS=true` require
 an explicit `PARSER_SANDBOX_EXECUTABLE` plus configured arguments that enforce
 non-root, no-network, CPU, and memory limits. Only supported `bwrap` profiles
-only these exact ordered templates are accepted: `bwrap
+with these exact ordered templates are accepted: `bwrap
 --unshare-net --die-with-parent --new-session -- <parser argv>`, or `unshare
 --user --map-root-user --mount --uts --ipc --net --pid --fork --kill-child
 -- <parser argv>`. `/usr/bin/env`, extra flags, reordered flags, and parser

@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import ClassVar
 
+from rag_eval_api.parsers.runner_limits import MAX_MAX_PARSER_INPUT_BYTES
+
 
 @dataclass(frozen=True, slots=True)
 class ParserLimits:
@@ -30,7 +32,7 @@ class ParserLimits:
     max_docx_xml_depth: int = 100
 
     _SAFE_UPPER_BOUNDS: ClassVar[dict[str, int | float]] = {
-        "max_input_bytes": 1024 * 1024 * 1024,
+        "max_input_bytes": MAX_MAX_PARSER_INPUT_BYTES,
         "max_pages": 100_000,
         "max_paragraphs": 1_000_000,
         "max_normalized_characters": 10_000_000,

@@ -1,6 +1,6 @@
 # Document Ingestion and Candidate Evaluation Data Implementation Plan
 
-> **Status:** Draft implementation plan. This plan must be approved by code review before implementation tasks begin.
+> **Status:** Approved implementation plan; execution in progress. The current branch has completed the foundation, persistence, BlobStore, parser, and integration-gate slices. HTTP API, worker, candidate generation, and Documents UI remain subsequent slices in this plan.
 
 ## Goal
 

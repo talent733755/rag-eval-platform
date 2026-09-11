@@ -12,9 +12,11 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Literal, cast
 
@@ -33,6 +35,7 @@ from rag_eval_api.parsers.errors import (
 from rag_eval_api.parsers.models import CanonicalChunk, ParseResult, ParserLimits
 from rag_eval_api.parsers.pdf import PdfParser
 from rag_eval_api.parsers.protocol import DocumentParser
+from rag_eval_api.parsers.runner_limits import MAX_MAX_PARSER_INPUT_BYTES
 
 _ErrorCode = Literal[
     "unsupported_type",
@@ -56,8 +59,11 @@ _MIN_CHILD_OUTPUT_BYTES = 1 * 1024 * 1024
 DEFAULT_MAX_PARSER_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_MAX_PARSER_OUTPUT_BYTES = 256 * 1024 * 1024
 _OUTPUT_ENVELOPE_BYTES = 64 * 1024
-_MAX_CHILD_REQUEST_BYTES = 768 * 1024 * 1024
 _REQUEST_METADATA_BYTES = 64 * 1024
+_MAX_CHILD_REQUEST_BYTES = ((MAX_MAX_PARSER_INPUT_BYTES + 2) // 3) * 4 + _REQUEST_METADATA_BYTES
+_STARTUP_CPU_SECONDS = 302
+_STARTUP_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
+_SAFE_CHILD_PATH = "/usr/local/bin:/usr/bin:/bin"
 _SANDBOX_PATHS: Mapping[str, frozenset[str]] = {
     "bwrap": frozenset({"/usr/bin/bwrap", "/usr/local/bin/bwrap"}),
     "unshare": frozenset({"/usr/bin/unshare", "/bin/unshare", "/usr/local/bin/unshare"}),
@@ -193,19 +199,34 @@ def sandbox_command_available(executable: str | None, args: Sequence[str]) -> bo
 
 
 def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
-    """Execute the exact profile against a harmless command before accepting it."""
+    """Exercise the exact profile's non-root, no-network and limit boundary."""
 
     process: subprocess.Popen[bytes] | None = None
+    probe_code = (
+        "import os, resource, socket\n"
+        "uid_map = open('/proc/self/uid_map', encoding='ascii').read().split()\n"
+        "mapped_root = len(uid_map) >= 3 and uid_map[:2] == ['0', str(os.getuid())]\n"
+        "if os.geteuid() == 0 and not mapped_root: raise SystemExit(11)\n"
+        "resource.setrlimit(resource.RLIMIT_CPU, (1, 1))\n"
+        "resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))\n"
+        "if resource.getrlimit(resource.RLIMIT_CPU)[0] != 1: raise SystemExit(12)\n"
+        "if resource.getrlimit(resource.RLIMIT_AS)[0] != 256 * 1024 * 1024: raise SystemExit(13)\n"
+        "interfaces = {name for _, name in socket.if_nameindex()}\n"
+        "if interfaces - {'lo'}: raise SystemExit(14)\n"
+    )
     try:
-        process = subprocess.Popen(
-            [executable, *args, "--", "/bin/true"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        process.wait(timeout=2.0)
-        return process.returncode == 0
+        with _private_parser_cwd() as cwd:
+            process = subprocess.Popen(
+                [executable, *args, "--", sys.executable, "-c", probe_code],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                cwd=cwd,
+                env=_child_environment(),
+            )
+            process.wait(timeout=2.0)
+            return process.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
     finally:
@@ -234,6 +255,30 @@ def _max_request_bytes(max_input_bytes: int) -> int:
 
     encoded_input_bytes = ((max_input_bytes + 2) // 3) * 4
     return encoded_input_bytes + _REQUEST_METADATA_BYTES
+
+
+def _child_environment() -> dict[str, str]:
+    """Build the parser environment without inheriting application secrets."""
+
+    package_root = str(Path(__file__).resolve().parents[2])
+    return {
+        "PATH": _SAFE_CHILD_PATH,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONHASHSEED": "0",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONPATH": package_root,
+        "PYTHONSAFEPATH": "1",
+        "PYTHONUNBUFFERED": "1",
+    }
+
+
+@contextmanager
+def _private_parser_cwd() -> Iterator[str]:
+    """Provide a disposable 0700 working directory for every parser child."""
+
+    with tempfile.TemporaryDirectory(prefix="rag-eval-parser-") as directory:
+        yield directory
 
 
 def _read_bounded(stream: BinaryIO, *, max_bytes: int) -> bytes:
@@ -314,6 +359,8 @@ class ParserRunner:
         limits: ParserLimits,
         timeout_seconds: float | None = None,
     ) -> ParseResult:
+        if limits.max_input_bytes > MAX_MAX_PARSER_INPUT_BYTES:
+            raise ParserLimitExceeded("input bytes exceed the parent parser budget")
         if len(data) > limits.max_input_bytes:
             raise ParserLimitExceeded("input bytes exceed the configured limit")
         timeout = self.default_timeout_seconds if timeout_seconds is None else timeout_seconds
@@ -346,35 +393,38 @@ class ParserRunner:
         ):
             raise ParserLimitExceeded("parser request exceeds the configured input budget")
         process: subprocess.Popen[bytes] | None = None
-        try:
-            process = subprocess.Popen(
-                self._command(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-            )
-            output, _ = self._communicate_bounded(
-                process,
-                request_bytes,
-                timeout,
-                self.max_output_bytes,
-            )
-        except ParserTimeout:
-            if process is not None:
-                self._terminate(process, force_group=True)
-            raise
-        except ParserSandboxUnavailable:
-            if process is not None:
-                self._terminate(process, force_group=True)
-            raise
-        except (OSError, ValueError) as exc:
-            if process is not None:
-                self._terminate(process, force_group=True)
-            raise ParserSandboxUnavailable("parser sandbox could not be started") from exc
-        finally:
-            if process is not None and process.poll() is None:
-                self._terminate(process, force_group=True)
+        with _private_parser_cwd() as cwd:
+            try:
+                process = subprocess.Popen(
+                    self._command(),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                    cwd=cwd,
+                    env=_child_environment(),
+                )
+                output, _ = self._communicate_bounded(
+                    process,
+                    request_bytes,
+                    timeout,
+                    self.max_output_bytes,
+                )
+            except ParserTimeout:
+                if process is not None:
+                    self._terminate(process, force_group=True)
+                raise
+            except ParserSandboxUnavailable:
+                if process is not None:
+                    self._terminate(process, force_group=True)
+                raise
+            except (OSError, ValueError) as exc:
+                if process is not None:
+                    self._terminate(process, force_group=True)
+                raise ParserSandboxUnavailable("parser sandbox could not be started") from exc
+            finally:
+                if process is not None and process.poll() is None:
+                    self._terminate(process, force_group=True)
 
         if process.returncode != 0:
             self._terminate(process, force_group=True)
@@ -461,6 +511,8 @@ class ParserRunner:
 
     def _command(self) -> list[str]:
         child = [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
+        if self.uses_os_sandbox:
+            child.append("--strict")
         if self.sandbox_executable is None:
             return child
         return [self.sandbox_executable, *self.sandbox_args, "--", *child]
@@ -555,6 +607,37 @@ def _configure_child_sandbox(
         _disable_network_fallback()
 
 
+def _configure_startup_limits() -> None:
+    """Apply fixed protocol limits before reading any child input."""
+
+    try:
+        import resource
+    except ImportError as exc:
+        raise ParserSandboxUnavailable("process resource limits are unavailable") from exc
+    if os.name != "posix" or not all(
+        hasattr(resource, name) for name in ("RLIMIT_CPU", "RLIMIT_AS")
+    ):
+        raise ParserSandboxUnavailable("process resource limits are unavailable")
+
+    try:
+        _set_finite_limit(resource, resource.RLIMIT_CPU, _STARTUP_CPU_SECONDS)
+        _set_finite_limit(resource, resource.RLIMIT_AS, _STARTUP_MEMORY_BYTES)
+    except (OSError, ValueError) as exc:
+        raise ParserSandboxUnavailable("process resource limits could not be applied") from exc
+
+
+def _set_finite_limit(resource_module: object, resource_kind: int, requested: int) -> None:
+    getrlimit = cast(object, getattr(resource_module, "getrlimit"))
+    setrlimit = cast(object, getattr(resource_module, "setrlimit"))
+    current_soft, current_hard = cast(tuple[int, int], getrlimit(resource_kind))  # type: ignore[operator]
+    del current_soft
+    infinity = cast(int, getattr(resource_module, "RLIM_INFINITY"))
+    effective = requested if current_hard == infinity else min(requested, current_hard)
+    if effective < 1:
+        raise ValueError("resource hard limit is not usable")
+    setrlimit(resource_kind, (effective, effective))  # type: ignore[operator]
+
+
 def _disable_network_fallback() -> None:
     """Development-only defense; never treated as OS network isolation."""
 
@@ -574,16 +657,32 @@ def _disable_network_fallback() -> None:
 
 
 def _child_main() -> None:
+    original_socket = socket.socket
+    original_create_connection = socket.create_connection
     try:
+        try:
+            _configure_startup_limits()
+        except ParserSandboxUnavailable:
+            if "--strict" in sys.argv:
+                raise
+            _disable_network_fallback()
         request_bytes = _read_bounded(sys.stdin.buffer, max_bytes=_MAX_CHILD_REQUEST_BYTES)
         request = _RequestEnvelope.model_validate(_strict_json_loads(request_bytes))
         envelope = _child_result(request)
     except ParserLimitExceeded as exc:
         envelope = _error_envelope(exc.code, str(exc))
+    except ParserSandboxUnavailable as exc:
+        envelope = _error_envelope(exc.code, str(exc))
     except BaseException:
         envelope = _error_envelope(
             "parser_sandbox_unavailable", "parser sandbox returned an invalid request"
         )
+    finally:
+        # Keep the development-only fallback patch scoped to the disposable
+        # child. This also makes direct protocol tests unable to corrupt the
+        # parent interpreter's networking primitives.
+        setattr(socket, "socket", original_socket)
+        setattr(socket, "create_connection", original_create_connection)
     sys.stdout.buffer.write(_json_bytes(envelope.model_dump(mode="json")))
     sys.stdout.buffer.flush()
 

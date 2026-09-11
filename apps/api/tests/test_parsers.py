@@ -5,6 +5,7 @@ import dataclasses
 import io
 import os
 import pickle
+import stat
 import sys
 import time
 import zipfile
@@ -525,7 +526,103 @@ def test_parser_runner_places_parser_argv_after_sandbox_separator(
         "--new-session",
         "--",
     ]
-    assert command[5:] == [sys.executable, "-m", "rag_eval_api.parsers.runner", "--child"]
+    assert command[5:] == [
+        sys.executable,
+        "-m",
+        "rag_eval_api.parsers.runner",
+        "--child",
+        "--strict",
+    ]
+
+
+def test_parser_runner_uses_minimal_environment_and_private_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = ParseResult(
+        parser_version="test-v1",
+        content_hash="0" * 64,
+        byte_size=1,
+        page_count=0,
+        paragraph_count=0,
+    )
+    output = runner_module._json_bytes(
+        {
+            "kind": "ok",
+            "result": runner_module._result_envelope(result).model_dump(mode="json"),
+        }
+    )
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = os.getpid()
+        returncode = 0
+        stdin = None
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+        captured["command"] = command
+        captured.update(kwargs)
+        cwd = Path(str(kwargs["cwd"]))
+        assert cwd.is_dir()
+        assert stat.S_IMODE(cwd.stat().st_mode) == 0o700
+        return FakeProcess()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://secret")
+    monkeypatch.setenv("PROVIDER_API_KEY", "secret")
+    monkeypatch.setattr(runner_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        ParserRunner,
+        "_communicate_bounded",
+        lambda self, process, request, timeout, output_limit: (output, b""),
+    )
+
+    ParserRunner().parse_bytes(
+        b"safe",
+        suffix=".pdf",
+        filename="safe.pdf",
+        declared_mime="application/pdf",
+        limits=ParserLimits(),
+    )
+
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    assert "DATABASE_URL" not in child_env
+    assert "PROVIDER_API_KEY" not in child_env
+    assert child_env["PYTHONPATH"] == str(Path(runner_module.__file__).resolve().parents[2])
+    assert not Path(str(captured["cwd"])).exists()
+
+
+def test_child_main_applies_fixed_limits_before_reading_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    def startup_limits() -> None:
+        events.append("startup-limits")
+
+    def read_protocol(*args: object, **kwargs: object) -> bytes:
+        del args, kwargs
+        events.append("read-protocol")
+        raise ParserLimitExceeded("protocol size")
+
+    monkeypatch.setattr(runner_module, "_configure_startup_limits", startup_limits, raising=False)
+    monkeypatch.setattr(runner_module, "_read_bounded", read_protocol)
+    stdout = io.BytesIO()
+    monkeypatch.setattr(runner_module.sys, "stdout", SimpleNamespace(buffer=stdout))
+    monkeypatch.setattr(runner_module.sys, "stdin", SimpleNamespace(buffer=io.BytesIO()))
+
+    runner_module._child_main()
+
+    assert events == ["startup-limits", "read-protocol"]
+    envelope = runner_module._strict_json_loads(stdout.getvalue())
+    assert isinstance(envelope, dict)
+    assert envelope["code"] == "size_exceeded"
+
+
+def test_parser_input_safe_upper_bound_matches_parent_protocol_budget() -> None:
+    assert ParserLimits.safe_upper_bounds()["max_input_bytes"] == 64 * 1024 * 1024
 
 
 def test_parser_runner_output_limit_is_the_explicit_serialized_budget() -> None:

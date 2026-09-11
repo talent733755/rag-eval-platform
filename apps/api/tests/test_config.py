@@ -19,6 +19,11 @@ def test_document_ingestion_defaults_are_safe_and_provider_is_opt_in() -> None:
     assert settings.parser_runner().max_output_bytes == 64 * 1024 * 1024
 
 
+def test_upload_budget_cannot_exceed_parser_protocol_ceiling() -> None:
+    with pytest.raises(ValueError, match="max_upload_bytes"):
+        Settings(_env_file=None, max_upload_bytes=64 * 1024 * 1024 + 1)
+
+
 @pytest.mark.parametrize("value", [1024 * 1024 - 1, 1024 * 1024 * 1024 + 1])
 def test_parser_output_budget_has_explicit_finite_bounds(value: int) -> None:
     with pytest.raises(ValueError, match="max_parser_output_bytes"):
