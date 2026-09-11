@@ -332,16 +332,26 @@ def _sandbox_runtime_bind_args() -> list[str]:
     executable = Path(sys.executable).resolve()
     original_executable = Path(sys.executable).absolute()
     package_root = Path(__file__).resolve().parents[2]
+    repository_root = _repository_root(package_root)
+    base_prefix = Path(getattr(sys, "base_prefix", sys.prefix)).resolve()
+    expected_venv_bin = (
+        repository_root / "apps" / "api" / ".venv" / "bin"
+        if repository_root is not None
+        else Path("/")
+    )
     if any(path == Path("/") for path in (executable, package_root)):
         return []
     if not (
         executable.is_file()
         and original_executable.exists()
         and original_executable.parent.name == "bin"
+        and (
+            original_executable.is_relative_to(expected_venv_bin)
+            or original_executable.is_relative_to(base_prefix / "bin")
+        )
         and _is_safe_runtime_entry(executable)
-        and package_root.name == "src"
-        and package_root.parent.name == "api"
-        and package_root.parent.parent.name == "apps"
+        and repository_root is not None
+        and package_root == repository_root / "apps" / "api" / "src"
         and (package_root / "rag_eval_api").is_dir()
     ):
         return []
@@ -369,13 +379,16 @@ def _sandbox_runtime_bind_args() -> list[str]:
 def _runtime_python_paths() -> set[Path]:
     """Return exact stdlib/site-package directories safe to bind read-only."""
 
-    prefix = Path(sys.prefix).resolve()
+    package_root = Path(__file__).resolve().parents[2]
+    repository_root = _repository_root(package_root)
+    if repository_root is None:
+        return set()
+    venv_root = repository_root / "apps" / "api" / ".venv"
     base_prefix = Path(getattr(sys, "base_prefix", sys.prefix)).resolve()
-    venv_root = prefix if prefix.name == ".venv" and prefix.parent.name == "api" else None
-    base_root_allowed = base_prefix.name.startswith("cpython-3.") or base_prefix in {
-        Path("/usr"),
-        Path("/usr/local"),
-    }
+    prefix = Path(sys.prefix).resolve()
+    if prefix not in {venv_root, Path("/usr"), Path("/usr/local")}:
+        return set()
+    base_root_allowed = _is_trusted_base_prefix(base_prefix)
     allowed: set[Path] = set()
     for key in ("stdlib", "platstdlib", "purelib", "platlib"):
         configured = sysconfig.get_path(key)
@@ -387,12 +400,12 @@ def _runtime_python_paths() -> set[Path]:
         if key in {"purelib", "platlib"}:
             if path.name not in {"site-packages", "dist-packages"}:
                 return set()
-            if venv_root is None or not path.is_relative_to(venv_root / "lib"):
+            if not path.is_relative_to(venv_root / "lib"):
                 return set()
         elif not path.name.startswith("python"):
             return set()
         elif not (
-            (venv_root is not None and path.is_relative_to(venv_root / "lib"))
+            path.is_relative_to(venv_root / "lib")
             or (base_root_allowed and path.is_relative_to(base_prefix / "lib"))
         ):
             return set()
@@ -404,6 +417,27 @@ def _runtime_python_paths() -> set[Path]:
             return set()
         allowed.add(path)
     return allowed
+
+
+def _repository_root(package_root: Path) -> Path | None:
+    """Find the checked-out repository that owns the parser package."""
+
+    for parent in package_root.parents:
+        if (parent / "apps" / "api" / "pyproject.toml").is_file():
+            return parent
+    return None
+
+
+def _is_trusted_base_prefix(prefix: Path) -> bool:
+    """Allow only known Python installation roots for dynamic read-only binds."""
+
+    trusted_roots = (
+        Path("/usr"),
+        Path("/usr/local"),
+        Path.home() / ".local" / "share" / "uv" / "python",
+        Path("/opt/hostedtoolcache") / "Python",
+    )
+    return any(prefix == root or prefix.is_relative_to(root) for root in trusted_roots)
 
 
 def _is_safe_runtime_entry(path: Path) -> bool:
