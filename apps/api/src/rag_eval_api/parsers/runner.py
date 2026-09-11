@@ -270,7 +270,7 @@ def _probe_sandbox_template(executable: str, args: Sequence[str]) -> bool:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
                 cwd="/",
-                env=_child_environment(),
+                env=_child_environment("/tmp"),
             )
             process.wait(timeout=2.0)
             return process.returncode == 0 and not sentinel_path.exists()
@@ -304,7 +304,7 @@ def _max_request_bytes(max_input_bytes: int) -> int:
     return encoded_input_bytes + _REQUEST_METADATA_BYTES
 
 
-def _child_environment() -> dict[str, str]:
+def _child_environment(temp_dir: str | None = None) -> dict[str, str]:
     """Build the parser environment without inheriting application secrets."""
 
     package_root = str(Path(__file__).resolve().parents[2])
@@ -317,17 +317,33 @@ def _child_environment() -> dict[str, str]:
         "PYTHONPATH": package_root,
         "PYTHONSAFEPATH": "1",
         "PYTHONUNBUFFERED": "1",
+        "TMPDIR": temp_dir or "/tmp",
     }
 
 
 def _sandbox_runtime_bind_args() -> list[str]:
     """Bind only the interpreter and parser code into bwrap's tmpfs root."""
 
+    executable = Path(sys.executable).resolve()
+    prefix = Path(sys.prefix).resolve()
+    package_root = Path(__file__).resolve().parents[2]
+    if any(path == Path("/") for path in (executable, prefix, package_root)):
+        return []
+    if not (
+        executable.is_file()
+        and _is_safe_runtime_prefix(prefix)
+        and package_root.name == "src"
+        and (package_root / "rag_eval_api").is_dir()
+    ):
+        return []
+    # Only bind the interpreter, its virtualenv, and the package source. In
+    # particular, never turn a malformed runtime path into ``--ro-bind / /``
+    # or expose a home/temp/project root directory wholesale.
     paths = {
         str(Path(sys.executable).absolute()),
-        str(Path(sys.executable).resolve()),
-        str(Path(sys.prefix).resolve()),
-        str(Path(__file__).resolve().parents[2]),
+        str(executable),
+        str(prefix),
+        str(package_root),
     }
     arguments: list[str] = []
     created_parents: set[str] = set()
@@ -345,12 +361,33 @@ def _sandbox_runtime_bind_args() -> list[str]:
     return arguments
 
 
+def _is_safe_runtime_prefix(prefix: Path) -> bool:
+    """Accept only a Python prefix, never a broad host directory."""
+
+    if prefix in {
+        Path("/"),
+        Path("/Users"),
+        Path("/home"),
+        Path("/root"),
+        Path("/tmp"),
+        Path("/var/tmp"),
+    }:
+        return False
+    return prefix in {Path("/usr"), Path("/usr/local")} or (prefix / "pyvenv.cfg").is_file()
+
+
 @contextmanager
 def _private_parser_cwd() -> Iterator[str]:
     """Provide a disposable 0700 working directory for every parser child."""
 
     with tempfile.TemporaryDirectory(prefix="rag-eval-parser-") as directory:
-        yield directory
+        try:
+            yield directory
+        finally:
+            try:
+                os.chmod(directory, 0o700)
+            except FileNotFoundError:
+                pass
 
 
 def _read_bounded(stream: BinaryIO, *, max_bytes: int) -> bytes:
@@ -475,7 +512,7 @@ class ParserRunner:
                     stderr=subprocess.PIPE,
                     start_new_session=True,
                     cwd=cwd,
-                    env=_child_environment(),
+                    env=_child_environment(cwd),
                 )
                 output, _ = self._communicate_bounded(
                     process,

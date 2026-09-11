@@ -603,7 +603,13 @@ def test_parser_runner_uses_minimal_environment_and_private_working_directory(
     assert "DATABASE_URL" not in child_env
     assert "PROVIDER_API_KEY" not in child_env
     assert child_env["PYTHONPATH"] == str(Path(runner_module.__file__).resolve().parents[2])
+    assert child_env["TMPDIR"] == captured["cwd"]
     assert not Path(str(captured["cwd"])).exists()
+
+
+def test_sandbox_runtime_binds_reject_broad_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner_module.sys, "prefix", "/")
+    assert runner_module._sandbox_runtime_bind_args() == []
 
 
 def test_child_main_applies_fixed_limits_before_reading_protocol(

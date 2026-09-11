@@ -9,6 +9,7 @@ export COMPOSE_DISABLE_ENV_FILE=1
 runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/rag-eval-integration.XXXXXX")"
 compose_env_file="$runtime_dir/compose.env"
 test_env_file="$runtime_dir/test.env"
+compose=()
 run_id="${GITHUB_RUN_ID:-local-$(date +%s)-$$}"
 run_id="$(printf '%s' "$run_id" | tr -c '[:alnum:]' '-' | tr '[:upper:]' '[:lower:]')"
 compose_project="rag-eval-integration-$run_id"
@@ -22,8 +23,10 @@ cleanup() {
       printf '%s\n' 'WARNING: integration test database cleanup failed' >&2
     fi
   fi
-  if ! "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1; then
-    printf '%s\n' 'WARNING: integration Compose cleanup failed' >&2
+  if ((${#compose[@]} > 0)); then
+    if ! "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1; then
+      printf '%s\n' 'WARNING: integration Compose cleanup failed' >&2
+    fi
   fi
   rm -rf -- "$runtime_dir"
   exit "$status"
