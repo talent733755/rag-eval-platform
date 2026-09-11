@@ -330,19 +330,25 @@ def _sandbox_runtime_bind_args() -> list[str]:
     """Bind only the interpreter and parser code into bwrap's tmpfs root."""
 
     executable = Path(sys.executable).resolve()
+    original_executable = Path(sys.executable).absolute()
     package_root = Path(__file__).resolve().parents[2]
     if any(path == Path("/") for path in (executable, package_root)):
         return []
     if not (
         executable.is_file()
+        and original_executable.exists()
+        and original_executable.parent.name == "bin"
+        and _is_safe_runtime_entry(executable)
         and package_root.name == "src"
+        and package_root.parent.name == "api"
+        and package_root.parent.parent.name == "apps"
         and (package_root / "rag_eval_api").is_dir()
     ):
         return []
     # Bind only exact interpreter, standard-library, dependency and package
     # directories. In particular, never turn a malformed runtime path into
     # ``--ro-bind / /`` or expose a virtualenv/project root wholesale.
-    paths = {str(Path(sys.executable).absolute()), str(executable), str(package_root)}
+    paths = {str(original_executable), str(executable), str(package_root)}
     paths.update(str(path) for path in _runtime_python_paths())
     arguments: list[str] = []
     created_parents: set[str] = set()
@@ -363,6 +369,13 @@ def _sandbox_runtime_bind_args() -> list[str]:
 def _runtime_python_paths() -> set[Path]:
     """Return exact stdlib/site-package directories safe to bind read-only."""
 
+    prefix = Path(sys.prefix).resolve()
+    base_prefix = Path(getattr(sys, "base_prefix", sys.prefix)).resolve()
+    venv_root = prefix if prefix.name == ".venv" and prefix.parent.name == "api" else None
+    base_root_allowed = base_prefix.name.startswith("cpython-3.") or base_prefix in {
+        Path("/usr"),
+        Path("/usr/local"),
+    }
     allowed: set[Path] = set()
     for key in ("stdlib", "platstdlib", "purelib", "platlib"):
         configured = sysconfig.get_path(key)
@@ -374,10 +387,33 @@ def _runtime_python_paths() -> set[Path]:
         if key in {"purelib", "platlib"}:
             if path.name not in {"site-packages", "dist-packages"}:
                 return set()
+            if venv_root is None or not path.is_relative_to(venv_root / "lib"):
+                return set()
         elif not path.name.startswith("python"):
+            return set()
+        elif not (
+            (venv_root is not None and path.is_relative_to(venv_root / "lib"))
+            or (base_root_allowed and path.is_relative_to(base_prefix / "lib"))
+        ):
+            return set()
+        try:
+            stat_result = path.stat()
+        except OSError:
+            return set()
+        if stat_result.st_mode & 0o022:
             return set()
         allowed.add(path)
     return allowed
+
+
+def _is_safe_runtime_entry(path: Path) -> bool:
+    """Reject writable or non-regular interpreter files before binding."""
+
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return False
+    return path.is_file() and not stat_result.st_mode & 0o022
 
 
 @contextmanager
