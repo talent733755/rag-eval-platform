@@ -89,11 +89,20 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - 复用上传文件校验、重复内容保护、幂等重放/冲突响应、BlobStore 资源清理和审计脱敏；
 - 保留旧版本与旧任务，新增版本历史回归测试，并重新生成 OpenAPI Web client。
 
+### 孤儿 Blob 对账基础
+
+当前工作树新增：
+
+- `BlobStore.iter_objects()`：安全枚举已发布 opaque regular objects，跳过临时文件、非法条目和不安全目录；
+- `reconcile_orphaned_blobs()`：以已提交的 `document_versions.storage_key` 为事实源，按宽限期清理旧孤儿，
+  统计近期跳过、已消失对象和删除失败；
+- BlobStore 与对账服务单元测试，覆盖引用保护、宽限期和失败重试计数。
+
 ## 3. 最近验证结果
 
 截至当前切片已执行：
 
-- API 非集成：`177 passed, 2 skipped, 5 deselected`；
+- API 非集成：`179 passed, 2 skipped, 5 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
@@ -102,29 +111,27 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - Web lint、typecheck、build：通过；
 - API Ruff check/format、mypy、`uv lock --check`、Shell 语法：通过；
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
-- 真实 PostgreSQL 集成测试：`5 passed, 179 deselected`，包含真实 LocalBlobStore 的并发版本上传闭环；
+- 真实 PostgreSQL 集成测试：`5 passed, 181 deselected`，包含真实 LocalBlobStore 的并发版本上传闭环；
 
 当前切片工作树干净；本分支仍未合并回 `main`，也未推送远程。
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上传 API、读取/任务 API 与显式版本上传已经形成文档摄取 HTTP 基础闭环，但仍不能视为完整
-文档摄取垂直闭环；后续还需补充真实 BlobStore/数据库集成、并发验证、持久化 worker 和
-Documents UI。
+上传 API、读取/任务 API、显式版本上传与孤儿 Blob 对账基础已经形成文档摄取 HTTP/存储基础闭环，
+但仍不能视为完整文档摄取垂直闭环；后续还需补充持久化 worker 和 Documents UI。
 保留的质量缺口如下：
 
-1. **进程崩溃后的 orphan reconciliation/GC** 尚未实现；HTTP 事务清理不能覆盖进程崩溃。
+1. **对账调度入口** 尚未接入持久化 worker/维护命令；HTTP 事务清理仍不能单独覆盖进程崩溃。
 2. **测试缺口**：跨组织、并发唯一冲突与 worker 端到端 PostgreSQL 覆盖仍需扩充；SQLite
    不能替代 PostgreSQL 约束/并发集成测试。
 
-下一步建议：先补真实 BlobStore/PostgreSQL 集成与并发验证，再实现 orphan reconciliation/GC、
-持久化 worker，最后进入 Documents UI。
+下一步建议：将对账服务接入持久化 worker 或独立维护命令，再实现解析 worker，最后进入 Documents UI。
 
 ## 5. 下一阶段路线
 
 修复上述上传 API 阻断项后，按实施计划继续：
 
-1. 继续统一 cursor、状态、错误 envelope 和权限，并补齐真实 BlobStore/PostgreSQL 集成与并发验证。
+1. 将 Blob 对账接入持久化维护入口，继续统一 cursor、状态、错误 envelope 和权限。
 2. 实现持久化 `JobRepository`：PostgreSQL `FOR UPDATE SKIP LOCKED`、lease/heartbeat、
    fencing token、append-only attempt、取消/重试/崩溃恢复；所有副作用写入必须验证 token。
 3. 实现可独立运行的 `python -m rag_eval_api.worker`，使用 `ParserRunner` 读取 BlobStore，

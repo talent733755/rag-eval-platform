@@ -51,9 +51,21 @@ limit while reading, computes SHA-256, fsyncs, and publishes with an atomic
 no-overwrite operation in the same filesystem. Temporary files are removed on
 success, checksum/size failure, exception, cancellation, and process cleanup.
 `open`, `exists`, and `delete` reject absolute keys, traversal, malformed keys,
-symlinked directories/files, and missing blobs. Storage logs include only safe
-metadata such as size and digest; they never include local paths, filenames, or
-secrets. Object storage can be added later behind the same protocol.
+symlinked directories/files, and missing blobs. `iter_objects` enumerates only
+published opaque regular objects and returns bounded metadata including byte
+size and UTC modification time; temporary uploads, malformed entries, and
+unsafe directories are never returned as deletable objects. Storage logs
+include only safe metadata such as size and digest; they never include local
+paths, filenames, or secrets. Object storage can be added later behind the
+same protocol.
+
+Orphan reconciliation reads committed `document_versions.storage_key` values
+from PostgreSQL before considering deletion. It deletes only unreferenced
+objects older than the configured grace period; recent objects protect a
+request that published bytes before its database transaction committed. A
+missing object is treated as converged, while other deletion failures are
+counted and retried by a later maintenance pass. Reconciliation never deletes
+an object referenced by a document version or a future published lineage.
 
 ## Parser contract
 

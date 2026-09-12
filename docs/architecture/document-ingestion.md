@@ -25,13 +25,22 @@ these tables with ad-hoc status strings.
 
 ## BlobStore boundary
 
-`rag_eval_api.storage.protocol.BlobStore` is intentionally small: `put`,
-`open`, `exists`, and `delete`. `LocalBlobStore` stores generated opaque keys
-under an absolute private root. It writes into a same-directory `0600` temp
-file, hashes and bounds the stream, fsyncs, then publishes with a no-overwrite
-hard-link operation. A key is accepted only when it matches the generated
-two-level grammar; path traversal, absolute paths, symlink resolution, and
-missing blobs fail closed. The root is never mounted as a public static path.
+`rag_eval_api.storage.protocol.BlobStore` exposes the upload/read/delete
+operations plus `iter_objects` for maintenance. `LocalBlobStore` stores
+generated opaque keys under an absolute private root. It writes into a
+same-directory `0600` temp file, hashes and bounds the stream, fsyncs, then
+publishes with a no-overwrite hard-link operation. A key is accepted only when
+it matches the generated two-level grammar; path traversal, absolute paths,
+symlink resolution, and missing blobs fail closed. Enumeration returns only
+published regular objects with UTC metadata and skips temporary or malformed
+entries. The root is never mounted as a public static path.
+
+The reconciliation service compares enumerated objects with committed
+`document_versions.storage_key` values. It applies a grace period before
+deleting an unreferenced object, which covers a process crash between blob
+publication and database commit. The service reports missing/deletion-failure
+counters and leaves failures for a later pass; a durable worker or scheduled
+maintenance command is responsible for invoking it.
 
 The blob store returns metadata, not a user filename or filesystem path. Future
 S3-compatible backends must preserve the no-overwrite, checksum, size, cleanup,

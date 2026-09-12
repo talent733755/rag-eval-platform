@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from io import BufferedReader
 from typing import BinaryIO, Protocol
 
@@ -15,6 +17,15 @@ class StoredBlob:
     storage_key: str
     byte_size: int
     sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class BlobObject:
+    """Published object metadata used by retention and reconciliation jobs."""
+
+    storage_key: str
+    byte_size: int
+    modified_at: datetime
 
 
 class BlobStore(Protocol):
@@ -33,3 +44,5 @@ class BlobStore(Protocol):
     def exists(self, storage_key: str) -> bool: ...
 
     def delete(self, storage_key: str) -> None: ...
+
+    def iter_objects(self) -> Iterator[BlobObject]: ...

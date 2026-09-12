@@ -18,6 +18,7 @@ import stat
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
@@ -29,10 +30,12 @@ from rag_eval_api.storage.errors import (
     BlobSecurityError,
     BlobSizeExceeded,
 )
-from rag_eval_api.storage.protocol import StoredBlob
+from rag_eval_api.storage.protocol import BlobObject, StoredBlob
 
 LOGGER = logging.getLogger(__name__)
 _KEY_PATTERN = re.compile(r"^[a-z2-7]{16}/[a-z2-7]{32}$")
+_BUCKET_PATTERN = re.compile(r"^[a-z2-7]{16}$")
+_OBJECT_PATTERN = re.compile(r"^[a-z2-7]{32}$")
 _READ_CHUNK_SIZE = 1024 * 1024
 _STALE_UPLOAD_PREFIX = ".upload-"
 
@@ -338,6 +341,35 @@ class LocalBlobStore:
             raise BlobSecurityError("blob could not be deleted safely") from exc
         finally:
             os.close(bucket_fd)
+
+    def iter_objects(self) -> Iterator[BlobObject]:
+        """Yield only published regular objects from the private root."""
+
+        for prefix in os.listdir(self.root_fd):
+            if not _BUCKET_PATTERN.fullmatch(prefix):
+                continue
+            try:
+                bucket_fd = self._open_bucket(prefix, create=False)
+            except (BlobKeyError, BlobNotFound, BlobSecurityError):
+                LOGGER.warning("blob object enumeration skipped", extra={"cleanup_failed": True})
+                continue
+            try:
+                for filename in os.listdir(bucket_fd):
+                    if not _OBJECT_PATTERN.fullmatch(filename):
+                        continue
+                    try:
+                        metadata = os.stat(filename, dir_fd=bucket_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if not stat.S_ISREG(metadata.st_mode):
+                        continue
+                    yield BlobObject(
+                        storage_key=f"{prefix}/{filename}",
+                        byte_size=metadata.st_size,
+                        modified_at=datetime.fromtimestamp(metadata.st_mtime, UTC),
+                    )
+            finally:
+                os.close(bucket_fd)
 
     def reap_stale_uploads(self, *, ttl_seconds: int | None = None) -> int:
         """Remove only old regular temp files directly under the private root."""

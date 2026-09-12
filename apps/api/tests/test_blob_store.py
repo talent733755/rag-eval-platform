@@ -150,3 +150,19 @@ def test_local_blob_store_reaps_only_stale_private_upload_files(tmp_path: Path) 
     assert store.reap_stale_uploads(ttl_seconds=60) == 1
     assert not stale.exists()
     assert fresh.exists()
+
+
+def test_local_blob_store_iterates_only_published_opaque_objects(tmp_path: Path) -> None:
+    root = tmp_path / "blobs"
+    store = LocalBlobStore(root)
+    stored = store.put(io.BytesIO(b"published"))
+    (root / ".upload-crashed").write_bytes(b"temporary")
+    invalid_bucket = root / ("a" * 16)
+    invalid_bucket.mkdir()
+    (invalid_bucket / "not-an-opaque-key").write_bytes(b"invalid")
+
+    objects = list(store.iter_objects())
+
+    assert [obj.storage_key for obj in objects] == [stored.storage_key]
+    assert objects[0].byte_size == stored.byte_size
+    assert objects[0].modified_at.tzinfo is not None
