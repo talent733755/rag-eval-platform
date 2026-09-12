@@ -68,12 +68,24 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - 空文件返回 `422 validation_error`；审计只写入 `idempotency_key_sha256`；
 - 新增生命周期、chunked body、提交失败清理和配置边界测试。
 
+### 文档读取与任务 API 切片
+
+已完成并提交：
+
+- `GET /api/projects/{project_id}/documents`：筛选、稳定排序、opaque cursor 分页和总数摘要；
+- `GET /documents/{document_id}`、`GET /documents/{document_id}/versions` 及版本详情；
+- `POST /documents/{document_id}/versions/{version_id}/retry-parse`：保留旧 job，创建新的
+  queued parse job，支持幂等重放和冲突拒绝；
+- `GET/POST /api/projects/{project_id}/ingestion-jobs/{job_id}`（取消使用 `/cancel`）：
+  项目级任务查询、取消、状态转换和审计；
+- viewer 读取权限、editor 重试/取消权限，以及跨项目查询隔离回归测试。
+
 ## 3. 最近验证结果
 
 在上传 API 安全修复切片上已执行：
 
-- API 非集成：`172 passed, 2 skipped, 4 deselected`；
-- 上传 API 与应用生命周期：`10 passed`；
+- API 非集成：读取/任务 API 新增测试后复核 `176 passed, 2 skipped, 4 deselected`；
+- 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
 - 根目录 `make lint`、`make typecheck`、`make test`、`make build` 全部通过；
@@ -87,23 +99,23 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上述阻断项已在当前切片处理。上传 API 仍不能视为整个文档摄取垂直闭环完成，后续还需
-补充真实 BlobStore/数据库集成、并发验证、版本 API、持久化 worker 和 Documents UI。
+上述阻断项已在当前切片处理。上传 API 与读取/任务 API 仍不能视为整个文档摄取垂直闭环
+完成，后续还需补充显式版本上传、真实 BlobStore/数据库集成、并发验证、持久化 worker
+和 Documents UI。
 保留的质量缺口如下：
 
 1. **进程崩溃后的 orphan reconciliation/GC** 尚未实现；HTTP 事务清理不能覆盖进程崩溃。
 2. **测试缺口**：真实 `LocalBlobStore`、跨组织、并发唯一冲突和 PostgreSQL 集成覆盖仍需
    扩充。SQLite 不能替代 PostgreSQL 约束/并发集成测试。
 
-下一步建议：先补真实 BlobStore/PostgreSQL 集成和 orphan reconciliation/GC 设计，再实现
-显式 document version、查询/详情/重试/取消 API；最后进入持久化 worker 和 Documents UI。
+下一步建议：先补显式 document version upload 和真实 BlobStore/PostgreSQL 集成，再实现
+orphan reconciliation/GC、持久化 worker，最后进入 Documents UI。
 
 ## 5. 下一阶段路线
 
 修复上述上传 API 阻断项后，按实施计划继续：
 
-1. 增加显式 document version upload、Documents 查询/详情/versions、retry parse、job
-   polling/cancel API；统一 cursor、状态、错误 envelope 和权限。
+1. 增加显式 document version upload；统一 cursor、状态、错误 envelope 和权限。
 2. 实现持久化 `JobRepository`：PostgreSQL `FOR UPDATE SKIP LOCKED`、lease/heartbeat、
    fencing token、append-only attempt、取消/重试/崩溃恢复；所有副作用写入必须验证 token。
 3. 实现可独立运行的 `python -m rag_eval_api.worker`，使用 `ParserRunner` 读取 BlobStore，

@@ -29,6 +29,7 @@ from rag_eval_api.db import (
     get_redis_client,
 )
 from rag_eval_api.middleware import RequestBodyLimitMiddleware
+from rag_eval_api.routes.documents import job_router as ingestion_jobs_router
 from rag_eval_api.routes.documents import router as documents_router
 from rag_eval_api.routes.projects import router as projects_router
 from rag_eval_api.storage.local import LocalBlobStore
@@ -220,6 +221,7 @@ def create_app(settings: Settings | None = None, blob_store: BlobStore | None = 
 
     application.include_router(projects_router)
     application.include_router(documents_router)
+    application.include_router(ingestion_jobs_router)
 
     @application.get("/health/live", response_model=None)
     async def liveness() -> dict[str, str]:

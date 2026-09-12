@@ -24,8 +24,10 @@ from rag_eval_api.models import (
     AuditEvent,
     Base,
     Document,
+    DocumentParseStatus,
     DocumentVersion,
     IngestionJob,
+    IngestionJobStatus,
     Membership,
     MembershipRole,
     Organization,
@@ -419,3 +421,163 @@ async def test_database_commit_failure_removes_published_blob(
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_server_error"
     assert blob_store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_viewer_can_list_document_detail_and_versions_with_opaque_pagination(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, blob_store = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="read-document")
+    second_uploaded = await upload(
+        client, seed.project_id, key="read-document-2", content=b"# Second document\n"
+    )
+    assert uploaded.status_code == 202
+    document_id = uploaded.json()["document"]["id"]
+    version_id = uploaded.json()["document_version"]["id"]
+    set_actor(VIEWER_ID)
+
+    listing = await client.get(
+        f"/api/projects/{seed.project_id}/documents",
+        params={"page_size": 1},
+    )
+    next_page = await client.get(
+        f"/api/projects/{seed.project_id}/documents",
+        params={"page_size": 1, "cursor": listing.json()["next_cursor"]},
+    )
+    detail = await client.get(f"/api/projects/{seed.project_id}/documents/{document_id}")
+    versions = await client.get(f"/api/projects/{seed.project_id}/documents/{document_id}/versions")
+    version = await client.get(
+        f"/api/projects/{seed.project_id}/documents/{document_id}/versions/{version_id}"
+    )
+
+    assert (
+        listing.status_code
+        == detail.status_code
+        == versions.status_code
+        == version.status_code
+        == 200
+    )
+    assert listing.json()["next_cursor"] is not None
+    assert listing.json()["summary"]["total"] == 2
+    assert next_page.status_code == 200
+    assert next_page.json()["next_cursor"] is None
+    assert {
+        listing.json()["items"][0]["id"],
+        next_page.json()["items"][0]["id"],
+    } == {document_id, second_uploaded.json()["document"]["id"]}
+    assert detail.json()["latest_version"]["id"] == version_id
+    assert versions.json()["items"][0]["id"] == version_id
+    assert version.json()["id"] == version_id
+    assert blob_store.calls == 2
+    async with session_factory() as session:
+        assert len((await session.scalars(select(Document))).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_document_listing_filters_and_cross_project_access_fails_closed(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, _, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="filter-document")
+    document_id = uploaded.json()["document"]["id"]
+    set_actor(VIEWER_ID)
+
+    filtered = await client.get(
+        f"/api/projects/{seed.project_id}/documents",
+        params={"q": "handbook", "source_type": "markdown", "parse_status": "queued"},
+    )
+    denied = await client.get(f"/api/projects/{seed.other_project_id}/documents")
+    hidden = await client.get(f"/api/projects/{seed.project_id}/documents/{uuid4()}/versions")
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == [document_id]
+    assert denied.status_code == 403
+    assert hidden.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_retry_parse_creates_new_job_and_replay_is_idempotent(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="retry-source")
+    body = uploaded.json()
+    document_id = UUID(body["document"]["id"])
+    version_id = UUID(body["document_version"]["id"])
+    async with session_factory() as session:
+        job = await session.scalar(
+            select(IngestionJob).where(IngestionJob.document_version_id == version_id)
+        )
+        version = await session.get(DocumentVersion, version_id)
+        assert job is not None and version is not None
+        job.status = IngestionJobStatus.failed
+        job.last_error_code = "parse_failed"
+        version.parse_status = DocumentParseStatus.failed
+        await session.commit()
+
+    first = await client.post(
+        f"/api/projects/{seed.project_id}/documents/{document_id}/versions/{version_id}/retry-parse",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    replay = await client.post(
+        f"/api/projects/{seed.project_id}/documents/{document_id}/versions/{version_id}/retry-parse",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+
+    assert first.status_code == replay.status_code == 202
+    assert first.json() == replay.json()
+    assert first.json()["id"] != body["ingestion_job"]["id"]
+    async with session_factory() as session:
+        jobs = list((await session.scalars(select(IngestionJob))).all())
+        assert len(jobs) == 2
+        assert len([job for job in jobs if job.status is IngestionJobStatus.queued]) == 1
+
+
+@pytest.mark.asyncio
+async def test_job_query_and_cancel_are_project_scoped(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, _, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="cancel-job")
+    job_id = uploaded.json()["ingestion_job"]["id"]
+
+    queried = await client.get(f"/api/projects/{seed.project_id}/ingestion-jobs/{job_id}")
+    cancelled = await client.post(f"/api/projects/{seed.project_id}/ingestion-jobs/{job_id}/cancel")
+    cross_project = await client.get(
+        f"/api/projects/{seed.other_project_id}/ingestion-jobs/{job_id}"
+    )
+
+    assert queried.status_code == 200
+    assert queried.json()["status"] == "queued"
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cross_project.status_code == 403
