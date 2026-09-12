@@ -93,7 +93,7 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 截至当前切片已执行：
 
-- API 非集成：`177 passed, 2 skipped, 4 deselected`；
+- API 非集成：`177 passed, 2 skipped, 5 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
@@ -102,7 +102,7 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - Web lint、typecheck、build：通过；
 - API Ruff check/format、mypy、`uv lock --check`、Shell 语法：通过；
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
-- 真实 PostgreSQL 集成测试此前已通过：`4 passed, 159 deselected`。
+- 真实 PostgreSQL 集成测试：`5 passed, 179 deselected`，包含真实 LocalBlobStore 的并发版本上传闭环；
 
 当前切片工作树干净；本分支仍未合并回 `main`，也未推送远程。
 
@@ -114,8 +114,8 @@ Documents UI。
 保留的质量缺口如下：
 
 1. **进程崩溃后的 orphan reconciliation/GC** 尚未实现；HTTP 事务清理不能覆盖进程崩溃。
-2. **测试缺口**：真实 `LocalBlobStore`、跨组织、并发唯一冲突和 PostgreSQL 集成覆盖仍需
-   扩充。SQLite 不能替代 PostgreSQL 约束/并发集成测试。
+2. **测试缺口**：跨组织、并发唯一冲突与 worker 端到端 PostgreSQL 覆盖仍需扩充；SQLite
+   不能替代 PostgreSQL 约束/并发集成测试。
 
 下一步建议：先补真实 BlobStore/PostgreSQL 集成与并发验证，再实现 orphan reconciliation/GC、
 持久化 worker，最后进入 Documents UI。
