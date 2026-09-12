@@ -3,9 +3,10 @@
 Status: proposed public contract for the first ingestion vertical.
 
 This contract is versioned independently from the web application. The current
-implementation establishes durable state, a private local BlobStore, and
-deterministic parser output. HTTP upload routes and the durable worker are later
-adapters and must consume these contracts without inventing a second format.
+implementation establishes durable state, a private local BlobStore,
+deterministic parser output, and the transactional core of the parse worker.
+HTTP routes and the standalone worker process are adapters and must consume
+these contracts without inventing a second format.
 
 ## Scope and limits
 
@@ -232,7 +233,9 @@ All timestamps are UTC RFC 3339 values. All IDs are UUIDs.
 
 ## Job states and transitions
 
-`ingestion_jobs.status` is the durable source of truth:
+`ingestion_jobs.status` is the durable source of truth. The worker claims a
+queued parse job under a row lock, increments `attempt_count`, and writes a
+lease with a monotonically increasing fencing token before doing parser work:
 
 ```text
 queued ──> processing ──> succeeded

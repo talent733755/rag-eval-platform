@@ -12,11 +12,12 @@ durable queue.
 
 This phase provides the public contract, safe runtime configuration, SQLAlchemy
 models, the `0002_document_ingestion`/`0003_ingestion_contract_hardening`
-migrations, pure job-domain rules, a private local BlobStore, and bounded
-format parsers. It deliberately does not implement:
+migrations, pure job-domain rules, a private local BlobStore, bounded format
+parsers, and the first persistent parse-worker service. It deliberately does
+not implement:
 
 - HTTP routes or multipart handling;
-- a worker process or Compose worker service;
+- an independently runnable worker process or Compose worker service;
 - object-storage adapters;
 - provider calls or fabricated parse/candidate results.
 
@@ -91,8 +92,14 @@ group is killed on timeout, malformed output, EOF, crash, or output overflow.
 The parent/child protocol is strict UTF-8 JSON, never
 pickle or another executable object format. Timeout, malformed output, EOF, and
 crash outcomes retain the public `parse_timeout` and
-`parser_sandbox_unavailable` error codes. The current parser runner is not a
-worker process and does not complete upload-to-parse workflow.
+`parser_sandbox_unavailable` error codes. The parser runner is not itself a
+worker process. `IngestionWorker` now provides the transactional one-job
+execution boundary: it claims queued parse jobs with a PostgreSQL row lock,
+creates a lease, parses through the BlobStore, persists immutable chunks,
+finalizes an append-only attempt, and writes a worker audit event. Expired
+leases are requeued with an incremented fencing token. A standalone polling
+process, heartbeat loop, and Compose readiness wrapper remain to be added
+around this service.
 
 The child output budget is explicit `MAX_PARSER_OUTPUT_BYTES` configuration
 (64 MiB by default, with a 1 MiB–256 MiB bound) and is reserved for serialized

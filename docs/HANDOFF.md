@@ -3,7 +3,7 @@
 > 更新时间：2026-09-12
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：当前分支最新提交（孤儿 Blob 对账基础）
+> 当前提交：当前分支最新提交（持久化解析 Worker 核心）
 
 ## 1. 接续规则
 
@@ -91,18 +91,28 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 ### 孤儿 Blob 对账基础
 
-当前工作树新增：
+已完成并提交：
 
 - `BlobStore.iter_objects()`：安全枚举已发布 opaque regular objects，跳过临时文件、非法条目和不安全目录；
 - `reconcile_orphaned_blobs()`：以已提交的 `document_versions.storage_key` 为事实源，按宽限期清理旧孤儿，
   统计近期跳过、已消失对象和删除失败；
 - BlobStore 与对账服务单元测试，覆盖引用保护、宽限期和失败重试计数。
 
+### 持久化解析 Worker 核心
+
+已完成并提交：
+
+- `IngestionWorker.run_once()`：使用 PostgreSQL 行锁领取 queued parse job，创建 lease 和 fencing token，
+  通过 BlobStore/ParserRegistry 解析，并在一个完成事务中写入 immutable chunks、attempt history 和 audit；
+- 解析失败按稳定错误码落为 failed，成功结果更新版本统计；过期 lease 可安全将 processing job 重排队，
+  下一次领取会递增 attempt/fencing token；
+- 当前仍缺独立 worker 进程入口、心跳循环、Redis 唤醒和 Compose readiness。
+
 ## 3. 最近验证结果
 
 截至当前切片已执行：
 
-- API 非集成：`179 passed, 2 skipped, 5 deselected`；
+- API 非集成：`182 passed, 2 skipped, 5 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
@@ -117,21 +127,23 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上传 API、读取/任务 API、显式版本上传与孤儿 Blob 对账基础已经形成文档摄取 HTTP/存储基础闭环，
-但仍不能视为完整文档摄取垂直闭环；后续还需补充持久化 worker 和 Documents UI。
+上传 API、读取/任务 API、显式版本上传、孤儿 Blob 对账基础与解析 worker 核心已经形成文档摄取
+HTTP/存储/执行基础闭环，但仍不能视为完整文档摄取垂直闭环；后续还需补充 worker 进程入口和
+Documents UI。
 保留的质量缺口如下：
 
-1. **对账调度入口** 尚未接入持久化 worker/维护命令；HTTP 事务清理仍不能单独覆盖进程崩溃。
+1. **运行时入口** 尚未提供独立 worker 进程、心跳循环、Redis 唤醒和 Compose readiness；HTTP 事务
+   清理仍不能单独覆盖进程崩溃。
 2. **测试缺口**：跨组织、并发唯一冲突与 worker 端到端 PostgreSQL 覆盖仍需扩充；SQLite
    不能替代 PostgreSQL 约束/并发集成测试。
 
-下一步建议：将对账服务接入持久化 worker 或独立维护命令，再实现解析 worker，最后进入 Documents UI。
+下一步建议：补齐 worker 进程入口、心跳/批量循环和 Compose 集成，再进入 Documents UI。
 
 ## 5. 下一阶段路线
 
 修复上述上传 API 阻断项后，按实施计划继续：
 
-1. 将 Blob 对账接入持久化维护入口，继续统一 cursor、状态、错误 envelope 和权限。
+1. 将 Blob 对账接入 worker 维护入口，补齐 worker 进程、心跳/批量循环和 Compose readiness。
 2. 实现持久化 `JobRepository`：PostgreSQL `FOR UPDATE SKIP LOCKED`、lease/heartbeat、
    fencing token、append-only attempt、取消/重试/崩溃恢复；所有副作用写入必须验证 token。
 3. 实现可独立运行的 `python -m rag_eval_api.worker`，使用 `ParserRunner` 读取 BlobStore，

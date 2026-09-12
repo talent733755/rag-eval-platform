@@ -79,6 +79,14 @@ class IngestionJobState:
         raise InvalidJobTransition(f"job in {current} cannot be retried")
 
     @classmethod
+    def recover_target(cls, current: str) -> str:
+        """Return the queued state after a processing lease has expired."""
+
+        if current != "processing":
+            raise InvalidJobTransition(f"job in {current} cannot be recovered")
+        return "queued"
+
+    @classmethod
     def cancel_target(cls, current: str) -> str:
         """Return the terminal cancellation state for a cancellable job."""
 
