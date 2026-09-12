@@ -738,6 +738,226 @@ async def cancel_ingestion_job(
     return _job_response(job)
 
 
+@router.post(
+    "/{document_id}/versions",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_document_version(
+    project_id: UUID,
+    document_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")] = "",
+    access: ProjectAccess = Depends(require_project_editor),
+    db_session: AsyncSession = Depends(get_db_session),
+    blob_store: BlobStore = Depends(get_blob_store),
+) -> DocumentUploadResponse:
+    """Store a new immutable version for an explicitly selected document."""
+
+    idempotency_key = idempotency_key.strip()
+    if not idempotency_key or len(idempotency_key) > 255:
+        raise _error(422, "validation_error", "Idempotency-Key must be 1 to 255 characters.")
+    document, _ = await _scoped_document(
+        db_session,
+        organization_id=access.actor.organization_id,
+        project_id=project_id,
+        document_id=document_id,
+    )
+    display_name, suffix, source_type, detected_mime, accepted_mimes = _safe_filename(file.filename)
+    declared_mime = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if declared_mime and declared_mime not in accepted_mimes:
+        raise _error(415, "unsupported_type", "Declared MIME does not match the extension.")
+    byte_size, sha256, prefix = await _inspect_upload(file, max_bytes=_max_upload_bytes(request))
+    _validate_signature(suffix, prefix)
+    fingerprint = hashlib.sha256(
+        f"{document_id}:{_request_fingerprint(display_name=display_name, source_type=source_type, sha256=sha256, byte_size=byte_size)}".encode(
+            "ascii"
+        )
+    ).hexdigest()
+    organization_id = access.actor.organization_id
+
+    existing_job = await _find_job(
+        db_session,
+        organization_id=organization_id,
+        project_id=project_id,
+        idempotency_key=idempotency_key,
+    )
+    if existing_job is not None:
+        try:
+            ensure_idempotency(
+                (project_id, IngestionJobKind.parse.value, idempotency_key),
+                fingerprint,
+                existing_job.request_fingerprint,
+            )
+        except ValueError as exc:
+            raise _error(
+                409,
+                "idempotency_conflict",
+                "Idempotency-Key was already used with a different request.",
+            ) from exc
+        return await _load_job_response(db_session, existing_job)
+
+    duplicate = await _find_duplicate(
+        db_session,
+        organization_id=organization_id,
+        project_id=project_id,
+        sha256=sha256,
+        byte_size=byte_size,
+    )
+    if duplicate is not None:
+        raise _duplicate_error(*duplicate)
+
+    stored: StoredBlob | None = None
+    try:
+        stored = await run_in_threadpool(
+            blob_store.put,
+            file.file,
+            expected_sha256=sha256,
+            max_bytes=_max_upload_bytes(request),
+        )
+        if stored.sha256 != sha256 or stored.byte_size != byte_size:
+            raise _error(422, "checksum_mismatch", "Stored upload metadata does not match input.")
+
+        duplicate = await _find_duplicate(
+            db_session,
+            organization_id=organization_id,
+            project_id=project_id,
+            sha256=sha256,
+            byte_size=byte_size,
+        )
+        if duplicate is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+            raise _duplicate_error(*duplicate)
+
+        current_version = await db_session.scalar(
+            select(func.max(DocumentVersion.version_number)).where(
+                DocumentVersion.organization_id == organization_id,
+                DocumentVersion.project_id == project_id,
+                DocumentVersion.document_id == document_id,
+            )
+        )
+        version = DocumentVersion(
+            organization_id=organization_id,
+            project_id=project_id,
+            document=document,
+            version_number=int(current_version or 0) + 1,
+            sha256=stored.sha256,
+            byte_size=stored.byte_size,
+            detected_mime=detected_mime,
+            storage_key=stored.storage_key,
+            parse_status=DocumentParseStatus.queued,
+        )
+        db_session.add(version)
+        await db_session.flush()
+        document.latest_version_id = version.id
+        job = IngestionJob(
+            organization_id=organization_id,
+            project_id=project_id,
+            job_kind=IngestionJobKind.parse,
+            status=IngestionJobStatus.queued,
+            document_version_id=version.id,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint,
+        )
+        db_session.add(job)
+        record_audit_event(
+            db_session,
+            organization_id=organization_id,
+            project_id=project_id,
+            actor_id=access.actor.user_id,
+            action="document.version_uploaded",
+            resource_type="document_version",
+            resource_id=str(version.id),
+            metadata={
+                "request_id": str(getattr(request.state, "request_id", uuid4())),
+                "document_id": str(document_id),
+                "sha256": sha256,
+                "byte_size": byte_size,
+                "source_type": source_type.value,
+                "idempotency_key_sha256": hashlib.sha256(
+                    idempotency_key.encode("utf-8")
+                ).hexdigest(),
+            },
+        )
+        await db_session.commit()
+        return DocumentUploadResponse(
+            document=DocumentUploadDocument.model_validate(document),
+            document_version=DocumentUploadVersion.model_validate(version),
+            ingestion_job=DocumentUploadJob.model_validate(job),
+        )
+    except HTTPException:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise
+    except BlobSizeExceeded as exc:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise _error(
+            413, "size_exceeded", "Uploaded file exceeds the configured size limit."
+        ) from exc
+    except BlobChecksumMismatch as exc:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise _error(
+            422, "checksum_mismatch", "Uploaded file checksum could not be verified."
+        ) from exc
+    except BlobSecurityError as exc:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise _error(
+            503, "blob_security_error", "Blob storage rejected the upload safely."
+        ) from exc
+    except BlobStoreError as exc:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise _error(503, "blob_store_error", "Blob storage could not accept the upload.") from exc
+    except IntegrityError as exc:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        existing_job = await _find_job(
+            db_session,
+            organization_id=organization_id,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job is not None:
+            try:
+                ensure_idempotency(
+                    (project_id, IngestionJobKind.parse.value, idempotency_key),
+                    fingerprint,
+                    existing_job.request_fingerprint,
+                )
+            except ValueError as conflict:
+                raise _error(
+                    409,
+                    "idempotency_conflict",
+                    "Idempotency-Key was already used with a different request.",
+                ) from conflict
+            return await _load_job_response(db_session, existing_job)
+        duplicate = await _find_duplicate(
+            db_session,
+            organization_id=organization_id,
+            project_id=project_id,
+            sha256=sha256,
+            byte_size=byte_size,
+        )
+        if duplicate is not None:
+            raise _duplicate_error(*duplicate) from exc
+        raise _error(409, "conflict", "Upload conflicts with existing project data.") from exc
+    except Exception:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise
+
+
 @router.post("", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     project_id: UUID,

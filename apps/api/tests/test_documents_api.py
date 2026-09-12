@@ -191,6 +191,22 @@ def upload(
     )
 
 
+def upload_version(
+    client: httpx.AsyncClient,
+    project_id: UUID,
+    document_id: UUID,
+    *,
+    key: str,
+    filename: str = "handbook.md",
+    content: bytes = b"# Handbook v2\n",
+) -> httpx.Response:
+    return client.post(
+        f"/api/projects/{project_id}/documents/{document_id}/versions",
+        headers={"Idempotency-Key": key},
+        files={"file": (filename, content, "text/markdown")},
+    )
+
+
 @pytest.mark.asyncio
 async def test_editor_upload_creates_tenant_scoped_records_and_audit(
     document_api_environment: tuple[
@@ -553,6 +569,63 @@ async def test_retry_parse_creates_new_job_and_replay_is_idempotent(
         jobs = list((await session.scalars(select(IngestionJob))).all())
         assert len(jobs) == 2
         assert len([job for job in jobs if job.status is IngestionJobStatus.queued]) == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_version_upload_preserves_history_and_updates_latest_pointer(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, blob_store = document_api_environment
+    set_actor(EDITOR_ID)
+    first = await upload(client, seed.project_id, key="version-source", content=b"# v1\n")
+    document_id = UUID(first.json()["document"]["id"])
+
+    second = await upload_version(
+        client,
+        seed.project_id,
+        document_id,
+        key="version-2",
+        content=b"# v2\n",
+    )
+    replay = await upload_version(
+        client,
+        seed.project_id,
+        document_id,
+        key="version-2",
+        content=b"# v2\n",
+    )
+    duplicate = await upload_version(
+        client,
+        seed.project_id,
+        document_id,
+        key="version-duplicate",
+        content=b"# v1\n",
+    )
+
+    assert second.status_code == replay.status_code == 202
+    assert second.json() == replay.json()
+    assert second.json()["document"]["id"] == str(document_id)
+    assert second.json()["document_version"]["version_number"] == 2
+    assert second.json()["document"]["latest_version_id"] == second.json()["document_version"]["id"]
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "duplicate_document"
+    assert blob_store.calls == 2
+    async with session_factory() as session:
+        versions = list(
+            (
+                await session.scalars(
+                    select(DocumentVersion).where(DocumentVersion.document_id == document_id)
+                )
+            ).all()
+        )
+        assert {version.version_number for version in versions} == {1, 2}
+        assert len((await session.scalars(select(IngestionJob))).all()) == 2
 
 
 @pytest.mark.asyncio

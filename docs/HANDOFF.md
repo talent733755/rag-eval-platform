@@ -3,7 +3,7 @@
 > 更新时间：2026-09-12
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：当前分支最新提交（上传 API 安全修复切片）
+> 当前提交：当前分支最新提交（文档版本上传切片）
 
 ## 1. 接续规则
 
@@ -80,11 +80,20 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
   项目级任务查询、取消、状态转换和审计；
 - viewer 读取权限、editor 重试/取消权限，以及跨项目查询隔离回归测试。
 
+### 显式文档版本上传切片
+
+已完成并提交：
+
+- `POST /api/projects/{project_id}/documents/{document_id}/versions`：为已有文档创建下一个
+  immutable version，更新 `latest_version_id`，并创建 queued parse job；
+- 复用上传文件校验、重复内容保护、幂等重放/冲突响应、BlobStore 资源清理和审计脱敏；
+- 保留旧版本与旧任务，新增版本历史回归测试，并重新生成 OpenAPI Web client。
+
 ## 3. 最近验证结果
 
-在上传 API 安全修复切片上已执行：
+截至当前切片已执行：
 
-- API 非集成：读取/任务 API 新增测试后复核 `176 passed, 2 skipped, 4 deselected`；
+- API 非集成：`177 passed, 2 skipped, 4 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
@@ -95,27 +104,27 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
 - 真实 PostgreSQL 集成测试此前已通过：`4 passed, 159 deselected`。
 
-当前工作树在上传 API 安全修复切片后干净；本分支仍未合并回 `main`，也未推送远程。
+当前切片工作树干净；本分支仍未合并回 `main`，也未推送远程。
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上述阻断项已在当前切片处理。上传 API 与读取/任务 API 仍不能视为整个文档摄取垂直闭环
-完成，后续还需补充显式版本上传、真实 BlobStore/数据库集成、并发验证、持久化 worker
-和 Documents UI。
+上传 API、读取/任务 API 与显式版本上传已经形成文档摄取 HTTP 基础闭环，但仍不能视为完整
+文档摄取垂直闭环；后续还需补充真实 BlobStore/数据库集成、并发验证、持久化 worker 和
+Documents UI。
 保留的质量缺口如下：
 
 1. **进程崩溃后的 orphan reconciliation/GC** 尚未实现；HTTP 事务清理不能覆盖进程崩溃。
 2. **测试缺口**：真实 `LocalBlobStore`、跨组织、并发唯一冲突和 PostgreSQL 集成覆盖仍需
    扩充。SQLite 不能替代 PostgreSQL 约束/并发集成测试。
 
-下一步建议：先补显式 document version upload 和真实 BlobStore/PostgreSQL 集成，再实现
-orphan reconciliation/GC、持久化 worker，最后进入 Documents UI。
+下一步建议：先补真实 BlobStore/PostgreSQL 集成与并发验证，再实现 orphan reconciliation/GC、
+持久化 worker，最后进入 Documents UI。
 
 ## 5. 下一阶段路线
 
 修复上述上传 API 阻断项后，按实施计划继续：
 
-1. 增加显式 document version upload；统一 cursor、状态、错误 envelope 和权限。
+1. 继续统一 cursor、状态、错误 envelope 和权限，并补齐真实 BlobStore/PostgreSQL 集成与并发验证。
 2. 实现持久化 `JobRepository`：PostgreSQL `FOR UPDATE SKIP LOCKED`、lease/heartbeat、
    fencing token、append-only attempt、取消/重试/崩溃恢复；所有副作用写入必须验证 token。
 3. 实现可独立运行的 `python -m rag_eval_api.worker`，使用 `ParserRunner` 读取 BlobStore，
