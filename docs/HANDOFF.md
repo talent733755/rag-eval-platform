@@ -3,7 +3,7 @@
 > 更新时间：2026-09-12
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：当前分支最新提交（文档版本上传切片）
+> 当前提交：当前分支最新提交（孤儿 Blob 对账基础）
 
 ## 1. 接续规则
 
