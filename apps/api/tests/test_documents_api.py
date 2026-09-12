@@ -37,6 +37,15 @@ EDITOR_ID = UUID("00000000-0000-0000-0000-000000000201")
 VIEWER_ID = UUID("00000000-0000-0000-0000-000000000202")
 
 
+class OversizedRequestBody(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield (
+            b'--untrusted\r\nContent-Disposition: form-data; name="file"; '
+            b'filename="payload.md"\r\nContent-Type: text/markdown\r\n\r\nok'
+        )
+        yield b"y" * 200
+
+
 @dataclass
 class FakeBlobStore:
     blobs: dict[str, bytes] = field(default_factory=dict)
@@ -133,6 +142,7 @@ async def document_api_environment() -> AsyncIterator[
         log_level="INFO",
         secret_key=SecretStr(DEFAULT_SECRET_KEY),
         max_upload_bytes=32,
+        max_request_body_bytes=256,
         _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
@@ -232,6 +242,10 @@ async def test_editor_upload_creates_tenant_scoped_records_and_audit(
         assert audit is not None
         assert audit.action == "document.uploaded"
         assert audit.actor_id == EDITOR_ID
+        assert (
+            audit.metadata_json["idempotency_key_sha256"] == hashlib.sha256(b"upload-1").hexdigest()
+        )
+        assert "idempotency_key" not in audit.metadata_json
 
 
 @pytest.mark.asyncio
@@ -262,7 +276,7 @@ async def test_viewer_cannot_upload_and_project_access_is_tenant_scoped(
     ("filename", "content", "expected_status", "expected_code"),
     [
         ("payload.exe", b"data", 415, "unsupported_type"),
-        ("empty.md", b"", 413, "size_exceeded"),
+        ("empty.md", b"", 422, "validation_error"),
         ("too-large.md", b"1" * 33, 413, "size_exceeded"),
     ],
 )
@@ -346,3 +360,62 @@ async def test_same_project_content_returns_duplicate_document_without_new_blob(
     async with session_factory() as session:
         assert len((await session.scalars(select(Document))).all()) == 1
         assert len((await session.scalars(select(DocumentVersion))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_request_body_limit_rejects_chunked_body_before_multipart_parsing(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, _, blob_store = document_api_environment
+    set_actor(EDITOR_ID)
+
+    response = await client.post(
+        f"/api/projects/{seed.project_id}/documents",
+        headers={
+            "Content-Type": "multipart/form-data; boundary=untrusted",
+            "Idempotency-Key": "chunked-too-large",
+        },
+        content=OversizedRequestBody(),
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {
+        "error": {
+            "code": "size_exceeded",
+            "message": "Request body exceeds the configured size limit.",
+        }
+    }
+    assert blob_store.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_database_commit_failure_removes_published_blob(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, seed, set_actor, _, blob_store = document_api_environment
+    set_actor(EDITOR_ID)
+
+    async def fail_commit(session: AsyncSession) -> None:
+        del session
+        raise RuntimeError("database commit failed")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+
+    response = await upload(client, seed.project_id, key="commit-failure")
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_server_error"
+    assert blob_store.blobs == {}

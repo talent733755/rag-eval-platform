@@ -32,6 +32,11 @@ class FakeRedisClient:
         return True
 
 
+class NoopBlobStore:
+    def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def db_session() -> FakeDatabaseSession:
     return FakeDatabaseSession()
@@ -62,7 +67,7 @@ def app() -> Iterator[FastAPI]:
         secret_key=SecretStr(DEFAULT_SECRET_KEY),
         _env_file=None,  # type: ignore[call-arg]
     )
-    application = create_app(settings=settings)
+    application = create_app(settings=settings, blob_store=NoopBlobStore())
     try:
         yield application
     finally:

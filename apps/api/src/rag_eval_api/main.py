@@ -28,8 +28,11 @@ from rag_eval_api.db import (
     get_db_session,
     get_redis_client,
 )
+from rag_eval_api.middleware import RequestBodyLimitMiddleware
 from rag_eval_api.routes.documents import router as documents_router
 from rag_eval_api.routes.projects import router as projects_router
+from rag_eval_api.storage.local import LocalBlobStore
+from rag_eval_api.storage.protocol import BlobStore
 
 HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 logger = logging.getLogger(LOGGER_NAME)
@@ -82,15 +85,24 @@ def configure_logging(settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    yield
-    await close_resources(application)
+    try:
+        if not hasattr(application.state, "blob_store"):
+            settings = application.state.settings
+            application.state.blob_store = LocalBlobStore(
+                settings.blob_root,
+                max_bytes=settings.max_upload_bytes,
+            )
+            application.state.blob_store_owned = True
+        yield
+    finally:
+        await close_resources(application)
 
 
 def _error_payload(code: str, message: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code, "message": message}}
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, blob_store: BlobStore | None = None) -> FastAPI:
     configured_settings = settings or get_settings()
     configure_logging(configured_settings)
     application = FastAPI(
@@ -99,6 +111,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = configured_settings
+    if blob_store is not None:
+        application.state.blob_store = blob_store
+        application.state.blob_store_owned = False
     configure_database(application, configured_settings)
     configure_redis(application, configured_settings)
     application.add_middleware(
@@ -139,6 +154,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                 },
             )
+
+    # Keep this outermost so a receive-time limit violation cannot be converted
+    # into a multipart parser error by an inner middleware.
+    application.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=configured_settings.max_request_body_bytes,
+    )
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(

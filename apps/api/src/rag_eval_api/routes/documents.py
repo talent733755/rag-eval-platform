@@ -150,7 +150,7 @@ async def _inspect_upload(upload: UploadFile, *, max_bytes: int) -> tuple[int, s
             prefix.extend(chunk[: 16 - len(prefix)])
     await upload.seek(0)
     if byte_size == 0:
-        raise _error(413, "size_exceeded", "Uploaded file must not be empty.")
+        raise _error(422, "validation_error", "Uploaded file must not be empty.")
     return byte_size, digest.hexdigest(), bytes(prefix)
 
 
@@ -410,7 +410,9 @@ async def upload_document(
                 "sha256": sha256,
                 "byte_size": byte_size,
                 "source_type": source_type.value,
-                "idempotency_key": idempotency_key,
+                "idempotency_key_sha256": hashlib.sha256(
+                    idempotency_key.encode("utf-8")
+                ).hexdigest(),
             },
         )
         await db_session.commit()
@@ -484,3 +486,8 @@ async def upload_document(
         if duplicate is not None:
             raise _duplicate_error(*duplicate) from exc
         raise _error(409, "conflict", "Upload conflicts with existing project data.") from exc
+    except Exception:
+        await db_session.rollback()
+        if stored is not None:
+            await _delete_blob_quietly(blob_store, stored.storage_key)
+        raise

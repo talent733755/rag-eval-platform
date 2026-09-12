@@ -1,9 +1,9 @@
 # 项目接手文件
 
-> 更新时间：2026-09-11
+> 更新时间：2026-09-12
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：`d1db722 feat: add document upload api`
+> 当前提交：当前分支最新提交（上传 API 安全修复切片）
 
 ## 1. 接续规则
 
@@ -58,46 +58,45 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - 成功上传写 `document.uploaded` audit event；
 - 相关测试：`apps/api/tests/test_documents_api.py`，当前 7 个测试通过。
 
+### 上传 API 安全修复切片
+
+已补齐上一节阻断项中的实现和回归测试：
+
+- 应用 lifespan 默认装配并关闭 `LocalBlobStore`；测试可注入替代 BlobStore；
+- ASGI receive 层在 multipart 解析前限制完整请求体，并保留路由/BlobStore 文件级限制；
+- 数据库提交、完整异常和已知冲突路径都会清理已发布但未被数据库引用的 blob；
+- 空文件返回 `422 validation_error`；审计只写入 `idempotency_key_sha256`；
+- 新增生命周期、chunked body、提交失败清理和配置边界测试。
+
 ## 3. 最近验证结果
 
-在 `d1db722` 及其父提交上已执行：
+在上传 API 安全修复切片上已执行：
 
-- API 非集成：`168 passed, 2 skipped, 4 deselected`；
-- 上传 API：`7 passed`；
+- API 非集成：`172 passed, 2 skipped, 4 deselected`；
+- 上传 API 与应用生命周期：`10 passed`；
+- 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`54 passed`；
+- 根目录 `make lint`、`make typecheck`、`make test`、`make build` 全部通过；
+- `uv lock --directory apps/api --check` 和 Shell 语法检查通过；
 - Web lint、typecheck、build：通过；
 - API Ruff check/format、mypy、`uv lock --check`、Shell 语法：通过；
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
 - 真实 PostgreSQL 集成测试此前已通过：`4 passed, 159 deselected`。
 
-当前工作树在整理本文件前是干净的；本文件新增后需要单独提交。
+当前工作树在上传 API 安全修复切片后干净；本分支仍未合并回 `main`，也未推送远程。
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上传 API 当前不能视为完成。最近独立契约/安全评审均为 `Not Spec compliant` / `Not
-Approved`，主要问题如下：
+上述阻断项已在当前切片处理。上传 API 仍不能视为整个文档摄取垂直闭环完成，后续还需
+补充真实 BlobStore/数据库集成、并发验证、版本 API、持久化 worker 和 Documents UI。
+保留的质量缺口如下：
 
-1. **生产应用没有装配 BlobStore。** `routes/documents.py` 只读取
-   `app.state.blob_store`，`create_app()` 尚未从 `Settings.blob_root` 创建并关闭
-   `LocalBlobStore`，真实应用会默认返回 `503 blob_storage_not_configured`。
-2. **请求级 multipart body 没有在解析前硬限制。** 路由内的 `_inspect_upload()` 只能限制
-   已经被 Starlette multipart parser 接收后的文件；必须在 ASGI receive/middleware 层限制
-   整个请求体，避免超大 chunked 请求或额外 multipart 字段耗尽临时磁盘/内存。仍需保留
-   路由和 BlobStore 两层限制。
-3. **Blob 发布和数据库提交不是同一事务。** BlobStore 发布成功后若数据库提交失败、
-   进程崩溃或发布阶段异常，可能留下无引用对象。至少要：发布后任何已知失败路径删除
-   opaque key；补普通 `Exception` 清理；并为进程崩溃场景设计 orphan reconciliation/GC，
-   不能声称单靠 HTTP 事务解决。
-4. **空文件状态码语义。** 当前返回 `413 size_exceeded`，契约评审建议改为 `422
-   validation_error`；需同步测试和公共契约。
-5. **审计敏感性。** 当前 metadata 原样保存用户提供的 `Idempotency-Key`，应改为保存
-   截断后的安全标识或 key hash，不把可控 header 原样写入审计记录。
-6. **测试缺口。** 需增加真实 `LocalBlobStore`、数据库提交失败、发布后清理、请求体硬上限、
-   跨组织、并发唯一冲突和生产 app 默认 BlobStore 装配测试。SQLite 不能替代 PostgreSQL
-   约束/并发集成测试。
+1. **进程崩溃后的 orphan reconciliation/GC** 尚未实现；HTTP 事务清理不能覆盖进程崩溃。
+2. **测试缺口**：真实 `LocalBlobStore`、跨组织、并发唯一冲突和 PostgreSQL 集成覆盖仍需
+   扩充。SQLite 不能替代 PostgreSQL 约束/并发集成测试。
 
-处理顺序建议：先补测试使上述问题红灯，再修 `main.py`/BlobStore 生命周期和 ASGI body
-limit；然后修上传事务清理与审计字段；最后跑全量质量门禁和双人评审。
+下一步建议：先补真实 BlobStore/PostgreSQL 集成和 orphan reconciliation/GC 设计，再实现
+显式 document version、查询/详情/重试/取消 API；最后进入持久化 worker 和 Documents UI。
 
 ## 5. 下一阶段路线
 

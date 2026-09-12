@@ -24,6 +24,14 @@ def test_upload_budget_cannot_exceed_parser_protocol_ceiling() -> None:
         Settings(_env_file=None, max_upload_bytes=64 * 1024 * 1024 + 1)
 
 
+def test_request_body_budget_covers_upload_and_multipart_overhead() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.max_request_body_bytes >= settings.max_upload_bytes
+
+    with pytest.raises(ValueError, match="MAX_REQUEST_BODY_BYTES"):
+        Settings(_env_file=None, max_upload_bytes=32, max_request_body_bytes=31)
+
+
 @pytest.mark.parametrize("value", [1024 * 1024 - 1, 1024 * 1024 * 1024 + 1])
 def test_parser_output_budget_has_explicit_finite_bounds(value: int) -> None:
     with pytest.raises(ValueError, match="max_parser_output_bytes"):

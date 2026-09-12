@@ -30,6 +30,8 @@ DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_SECRET_KEY = "development-only-secret"
 DEFAULT_BLOB_ROOT = "/var/lib/rag-eval/blobs"
 DEFAULT_MAX_UPLOAD_BYTES = DEFAULT_MAX_PARSER_INPUT_BYTES
+REQUEST_BODY_OVERHEAD_BYTES = 1024 * 1024
+DEFAULT_MAX_REQUEST_BODY_BYTES = DEFAULT_MAX_UPLOAD_BYTES + REQUEST_BODY_OVERHEAD_BYTES
 DEFAULT_MAX_PARSE_PAGES = 10_000
 DEFAULT_MAX_NORMALIZED_CHARACTERS = 200_000
 LOGGER_NAME = "rag_eval_api.request"
@@ -94,6 +96,14 @@ class Settings(BaseSettings):
             validation_alias=AliasChoices("MAX_UPLOAD_BYTES", "max_upload_bytes"),
         ),
     ] = DEFAULT_MAX_UPLOAD_BYTES
+    max_request_body_bytes: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=MAX_MAX_PARSER_INPUT_BYTES + REQUEST_BODY_OVERHEAD_BYTES,
+            validation_alias=AliasChoices("MAX_REQUEST_BODY_BYTES", "max_request_body_bytes"),
+        ),
+    ] = DEFAULT_MAX_REQUEST_BODY_BYTES
     max_parse_pages: Annotated[
         int,
         Field(
@@ -428,6 +438,8 @@ class Settings(BaseSettings):
         self.blob_root = str(blob_path)
         if self.worker_heartbeat_interval_seconds >= self.worker_lease_ttl_seconds:
             raise ValueError("WORKER_HEARTBEAT_INTERVAL_SECONDS must be less than lease TTL")
+        if self.max_request_body_bytes < self.max_upload_bytes:
+            raise ValueError("MAX_REQUEST_BODY_BYTES must be at least MAX_UPLOAD_BYTES")
         if "*" in self.provider_allowed_hosts:
             raise ValueError("PROVIDER_ALLOWED_HOSTS cannot contain wildcard entries")
         if self.provider_base_url is not None:

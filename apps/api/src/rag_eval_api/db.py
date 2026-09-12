@@ -94,7 +94,7 @@ def get_redis_client(request: Request) -> Redis:
 
 
 async def close_resources(app: Starlette) -> None:
-    """Release network resources during application shutdown."""
+    """Release application resources during application shutdown."""
 
     engine = getattr(app.state, "db_engine", None)
     if engine is not None:
@@ -125,3 +125,20 @@ async def close_resources(app: Starlette) -> None:
                     "exception_message": _sanitize_exception(exc),
                 },
             )
+
+    if getattr(app.state, "blob_store_owned", False):
+        blob_store = getattr(app.state, "blob_store", None)
+        close = getattr(blob_store, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception as exc:
+                logger.error(
+                    "resource.cleanup.failed",
+                    extra={
+                        "event": "resource.cleanup.failed",
+                        "resource": "blob_store",
+                        "exception_type": type(exc).__name__,
+                        "exception_message": _sanitize_exception(exc),
+                    },
+                )

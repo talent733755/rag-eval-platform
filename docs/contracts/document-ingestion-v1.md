@@ -246,6 +246,13 @@ before every side effect.
 `processing`, `succeeded`, `failed`, `cancelled`) and is not a substitute for
 the job history.
 
+The HTTP application also enforces a request-wide body limit before multipart
+parsing. `MAX_REQUEST_BODY_BYTES` includes multipart framing and additional
+fields and must be at least `MAX_UPLOAD_BYTES`; the upload route and BlobStore
+retain their independent per-file limits. An empty upload is a
+`422 validation_error`, while a non-empty request or file that exceeds a hard
+byte bound is `413 size_exceeded`.
+
 ## Error taxonomy
 
 Error codes are stable machine-readable identifiers. Messages are bounded,
@@ -350,8 +357,9 @@ The existing project roles apply to ingestion:
 
 Every mutation records an audit event with actor, tenant, action, resource ID,
 request ID, and a redacted metadata snapshot. Provider keys and raw document
-content are excluded from audit metadata. Published-reference protections
-apply to every role.
+content are excluded from audit metadata. User-provided idempotency keys are
+represented by a one-way SHA-256 identifier rather than stored verbatim.
+Published-reference protections apply to every role.
 
 ## Compatibility
 
