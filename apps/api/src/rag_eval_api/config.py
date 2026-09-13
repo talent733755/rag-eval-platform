@@ -342,6 +342,11 @@ class Settings(BaseSettings):
         Field(validation_alias=AliasChoices("DEV_ACTOR_ID", "dev_actor_id")),
     ] = None
 
+    @field_validator("dev_actor_id", mode="before")
+    @classmethod
+    def normalize_dev_actor_id(cls, value: object) -> object:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:

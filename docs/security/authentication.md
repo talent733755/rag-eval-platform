@@ -1,9 +1,10 @@
 # 认证边界
 
-当前 API 的认证依赖 `get_current_actor`，默认 fail-closed：未接入真实身份提供方时返回
-`501 not_implemented`，不会信任请求头、URL、JSON body 或客户端传入的 user/org ID。测试和
-本地确定性 fixture 只能通过 FastAPI dependency override 注入 `RequestActor`，且生产配置不
-允许使用 development 默认密钥。
+当前 API 的认证依赖 `get_current_actor`，默认 fail-closed：生产、staging 或未配置开发 actor
+时返回 `501 not_implemented`，不会信任请求头、URL、JSON body 或客户端传入的 user/org ID。
+本地 `APP_ENV=development` 可以显式配置 `DEV_ACTOR_ID`，API 仅从数据库 membership 推导其唯一
+organization；`scripts/seed-dev-data.py` 提供幂等的本地组织、项目和管理员 membership。测试仍通过
+FastAPI dependency override 注入 `RequestActor`，生产配置不允许使用 development 默认密钥。
 
 正式部署必须接入可替换的 OIDC/JWT provider，在边界完成签名、issuer、audience、过期时间和
 撤销策略校验，再向下游只传递 `user_id` 与 `organization_id`。项目角色继续由数据库 membership

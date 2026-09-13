@@ -42,6 +42,7 @@ services:
       APP_ENV: ${APP_ENV:?APP_ENV must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL must be set in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be set in .env}
+      DEV_ACTOR_ID: ${DEV_ACTOR_ID:-}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
       BLOB_ROOT: ${BLOB_ROOT:?BLOB_ROOT must be set in .env}
       DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set in .env}

@@ -106,6 +106,14 @@ def test_production_rejects_local_blob_root_and_unconfigured_provider_allowlist(
         )
 
 
+def test_development_actor_id_is_optional_when_empty() -> None:
+    settings = Settings.model_validate(
+        {"APP_ENV": "development", "DEV_ACTOR_ID": "", "_env_file": None}
+    )
+
+    assert settings.dev_actor_id is None
+
+
 @pytest.mark.parametrize(
     "root",
     [

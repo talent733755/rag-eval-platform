@@ -3,7 +3,7 @@
 > 更新时间：2026-09-13
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：`9ac126b`（开源发布治理与迁移回归）
+> 当前提交：`cce1f33`（开发服务端口与 Web 访问配置）
 
 ## 1. 接续规则
 
@@ -131,7 +131,7 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 文档摄取 HTTP/存储/执行基础闭环已完成。保留的产品与发布质量缺口如下：
 
-1. **认证**：真实 OIDC/JWT provider 尚未接入，development actor 不能替代生产认证。
+1. **认证**：本地 development actor 已接入并通过 membership 推导租户；真实 OIDC/JWT provider 尚未接入，development actor 不能替代生产认证。
 2. **产品契约**：成本费率、检索证据指标和完整全链路 E2E/Playwright 仍需补齐。
 
 本轮已解决 Docker Hub pinned Python 镜像返回 `403 Forbidden` 的构建阻断：API/Web/Worker 改用

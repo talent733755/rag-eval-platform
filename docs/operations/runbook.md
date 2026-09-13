@@ -5,6 +5,7 @@
 ```bash
 make infra-up
 uv run --directory apps/api alembic upgrade head
+uv run --project apps/api python scripts/seed-dev-data.py
 uv run --directory apps/api uvicorn rag_eval_api.main:app --host 127.0.0.1 --port 8003
 uv run --directory apps/api python -m rag_eval_api.worker
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8003 corepack pnpm --dir apps/web dev -- --port 3003
@@ -12,6 +13,10 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8003 corepack pnpm --dir apps/web dev 
 
 检查 `/health/live` 判断进程存活，检查 `/health/ready` 判断 PostgreSQL、Redis 和 Worker
 readiness。Worker 使用 PostgreSQL 任务状态作为事实来源，Redis 不可用时只影响唤醒提示。
+
+本地开发必须在 `.env` 中保留 `APP_ENV=development` 和 `DEV_ACTOR_ID`，并在首次启动或重置数据库后
+执行迁移和 `scripts/seed-dev-data.py`。访问 Web 后若看到 `HTTP 501`，先检查是否误以为
+`Authorization` 请求头可以替代认证；生产认证尚未接入，开发 actor 也不会读取任何请求头。
 
 ## 数据与敏感信息
 
