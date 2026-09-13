@@ -80,6 +80,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/documents/{document_id}/generate-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Candidates
+         * @description Validate an explicit source version before creating generation work.
+         */
+        post: operations["generate_candidates_api_projects__project_id__documents__document_id__generate_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/documents/{document_id}/versions": {
         parameters: {
             query?: never;
@@ -261,6 +281,24 @@ export interface components {
              * Format: binary
              */
             file: string;
+        };
+        /** CandidateGenerationRequest */
+        CandidateGenerationRequest: {
+            /** Capability Version */
+            capability_version: string;
+            /** Dataset Name */
+            dataset_name: string;
+            /**
+             * Document Version Id
+             * Format: uuid
+             */
+            document_version_id: string;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Randomness */
+            randomness: number;
+            /** Seed */
+            seed?: number | null;
         };
         /**
          * DocumentJobResponse
@@ -829,6 +867,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_candidates_api_projects__project_id__documents__document_id__generate_candidates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateGenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */
