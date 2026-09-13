@@ -39,6 +39,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/adapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Adapters */
+        get: operations["list_adapters_api_projects__project_id__adapters_get"];
+        put?: never;
+        /** Create Adapter */
+        post: operations["create_adapter_api_projects__project_id__adapters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/candidate-datasets": {
         parameters: {
             query?: never;
@@ -425,6 +443,88 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdapterConfigCreate */
+        AdapterConfigCreate: {
+            /** Adapter Version */
+            adapter_version: string;
+            /** Credential Ref */
+            credential_ref?: string | null;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /** Endpoint */
+            endpoint?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "http" | "python";
+            /** Name */
+            name: string;
+            /**
+             * Retry Count
+             * @default 0
+             */
+            retry_count: number;
+            /**
+             * Timeout Seconds
+             * @default 30
+             */
+            timeout_seconds: number;
+            /**
+             * Trace Level
+             * @default minimal
+             * @enum {string}
+             */
+            trace_level: "none" | "minimal" | "full";
+        };
+        /** AdapterConfigResponse */
+        AdapterConfigResponse: {
+            /** Adapter Version */
+            adapter_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Credential Ref */
+            credential_ref: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Endpoint */
+            endpoint: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Last Test Status */
+            last_test_status: string;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Retry Count */
+            retry_count: number;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+            /** Token Last4 */
+            token_last4: string | null;
+            /** Trace Level */
+            trace_level: string;
+        };
         /** Body_archive_document_api_projects__project_id__documents__document_id__archive_post */
         Body_archive_document_api_projects__project_id__documents__document_id__archive_post: {
             /**
@@ -1139,6 +1239,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_adapters_api_projects__project_id__adapters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterConfigResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_adapter_api_projects__project_id__adapters_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdapterConfigCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterConfigResponse"];
                 };
             };
             /** @description Validation Error */

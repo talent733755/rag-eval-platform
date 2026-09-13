@@ -83,4 +83,27 @@ describe("API client", () => {
     expect(init?.body).toBeInstanceOf(FormData);
     expect(Array.from((init?.body as FormData).getAll("files"))).toHaveLength(1);
   });
+
+  it("creates an adapter without sending credential material", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "adapter-1", name: "RAG", kind: "http" }), { status: 201 }),
+    );
+    const client = createApiClient({ baseUrl: "https://api.example.test", fetchImpl });
+
+    await client.createAdapter("project-id", {
+      name: "RAG",
+      kind: "http",
+      endpoint: "https://adapter.example.test",
+      credential_ref: "RAG_TOKEN",
+      adapter_version: "adapter-v1",
+      trace_level: "minimal",
+      timeout_seconds: 30,
+      retry_count: 0,
+      enabled: false,
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(init?.body).toContain("RAG_TOKEN");
+    expect(init?.body).not.toContain("secret-value");
+  });
 });

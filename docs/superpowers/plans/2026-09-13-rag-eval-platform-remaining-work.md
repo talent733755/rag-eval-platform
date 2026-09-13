@@ -65,10 +65,10 @@
 - Modify: `apps/api/src/rag_eval_api/adapters/http.py`, `apps/api/src/rag_eval_api/config.py`, Web adapters page
 - Test: `apps/api/tests/test_python_sdk_adapter.py`, `test_adapters_api.py`, `apps/web/tests/adapters-page.test.tsx`
 
-- [ ] **Step 1: 写契约和隔离测试。** Python fixture package 只能通过 entry point 返回 `AdapterResponse`，不能导入 API session；超时、取消、异常、版本不匹配和大响应均分类；配置列表只返回脱敏 token 摘要。
-- [ ] **Step 2: 实现 Python SDK Adapter。** 在受控 Worker 进程中加载注册 entry point，限制执行时长、异常边界、返回体大小和版本；禁止执行用户提交源码，fixture 只用于 development/test。
-- [ ] **Step 3: 持久化 Adapter 配置。** 保存 endpoint、认证引用、timeout、retry、adapter version、trace level、enabled、last_test 状态；明文 key 不进入数据库快照、日志或 API 响应。
-- [ ] **Step 4: 增加 CRUD/连接测试 API 和页面。** 连接测试使用合成问题，不存储真实文档；未启用或测试失败的 Adapter 在实验启动时返回 `adapter_unavailable`。
+- [x] **Step 1: 写契约和隔离测试。** 已覆盖 entry point 返回协议、异常/超时/超大响应分类和不泄露凭据；版本协商和取消回归将在实验执行器统一补齐。
+- [x] **Step 2: 实现 Python SDK Adapter。** 已使用 spawn 子进程加载受信任的已安装 entry point，限制执行时长、异常边界和返回体大小；不执行用户提交源码。
+- [x] **Step 3: 持久化 Adapter 配置。** 已保存 endpoint、环境变量凭据引用、timeout、retry、adapter version、trace level、enabled、last_test 状态；明文 key 不进入数据库/API。
+- [ ] **Step 4: 增加 CRUD/连接测试 API 和页面。** 已有列表/创建 API 和配置页；连接测试、更新/删除和实验启动前 `adapter_unavailable` 校验待完成。
 - [ ] **Step 5: 验证并提交。** 提交 `feat: 完成HTTP与Python Adapter管理`。
 
 ## Task 4：完成模型服务和实验配置快照
@@ -140,4 +140,5 @@
 - 已验证：API 非集成测试 `222 passed, 2 skipped, 6 deselected`；候选/文档定向测试 `29 passed`；Web `lint`、`typecheck`、Vitest `58 passed`。
 - 当前进行中：Task 1 Step 5 和 Task 2，重点是数据集分页/统一错误契约、文档任务状态轮询和候选审核 Web 闭环。
 - 本轮新增：候选审核页面、审核 reducer、文档详情抽屉和文档/任务操作 typed client；任务轮询、重试交互、数据集分页仍未完成。
+- 本轮新增：Python SDK Adapter 子进程隔离、Adapter 配置迁移/API/页面；连接测试和完整 CRUD 仍未完成。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

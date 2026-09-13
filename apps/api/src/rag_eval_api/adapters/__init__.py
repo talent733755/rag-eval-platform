@@ -11,6 +11,7 @@ from rag_eval_api.adapters.protocol import (
     TraceEnvelope,
     Usage,
 )
+from rag_eval_api.adapters.python_sdk import PythonSdkAdapter
 
 __all__ = [
     "ADAPTER_CAPABILITY_VERSION",
@@ -22,4 +23,5 @@ __all__ = [
     "TraceEnvelope",
     "Usage",
     "HttpAdapter",
+    "PythonSdkAdapter",
 ]

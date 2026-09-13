@@ -14,6 +14,8 @@ type CandidateItemResponse = components["schemas"]["CandidateItemResponse"];
 type CandidateReviewRequest = components["schemas"]["CandidateReviewRequest"];
 type CandidateGenerationRequest = components["schemas"]["CandidateGenerationRequest"];
 type CandidateGenerationJobResponse = components["schemas"]["CandidateGenerationJobResponse"];
+type AdapterConfig = components["schemas"]["AdapterConfigResponse"];
+type AdapterConfigCreate = components["schemas"]["AdapterConfigCreate"];
 
 type ErrorEnvelope = {
   error?: {
@@ -61,6 +63,8 @@ export type ApiClient = {
   publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   generateCandidates(projectId: string, documentId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
+  listAdapters(projectId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig[]>;
+  createAdapter(projectId: string, payload: AdapterConfigCreate, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
 };
 
 export function createApiClient({
@@ -185,6 +189,18 @@ export function createApiClient({
           },
         },
         fetchImpl,
+      );
+    },
+    async listAdapters(projectId, options) {
+      return requestJson<AdapterConfig[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async createAdapter(projectId, payload, options) {
+      return requestJson<AdapterConfig>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters`,
+        { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
       );
     },
   };

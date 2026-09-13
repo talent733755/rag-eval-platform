@@ -1,5 +1,6 @@
 """Application models imported here so metadata and migrations see every table."""
 
+from rag_eval_api.models.adapters import AdapterConfig, AdapterKind, AdapterTestStatus
 from rag_eval_api.models.audit_event import AuditEvent
 from rag_eval_api.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, utc_now
 from rag_eval_api.models.candidates import (
@@ -32,6 +33,9 @@ from rag_eval_api.models.project import Project
 
 __all__ = [
     "AuditEvent",
+    "AdapterConfig",
+    "AdapterKind",
+    "AdapterTestStatus",
     "Base",
     "CandidateDataset",
     "CandidateDatasetItem",

@@ -23,6 +23,7 @@ from rag_eval_api.config import DEFAULT_REDIS_URL, DEFAULT_SECRET_KEY, Settings
 from rag_eval_api.db import get_db_session
 from rag_eval_api.main import create_app
 from rag_eval_api.models import (
+    AdapterConfig,
     AuditEvent,
     Base,
     CandidateDataset,
@@ -925,3 +926,42 @@ async def test_candidate_generation_requires_configured_provider_before_creating
     assert response.json()["error"]["code"] == "provider_not_configured"
     async with session_factory() as session:
         assert (await session.scalars(select(IngestionJob))).all() == []
+
+
+@pytest.mark.asyncio
+async def test_editor_can_create_secret_free_adapter_configuration(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    response = await client.post(
+        f"/api/projects/{seed.project_id}/adapters",
+        json={
+            "name": "本地 RAG",
+            "kind": "http",
+            "endpoint": "https://adapter.example.test",
+            "credential_ref": "RAG_ADAPTER_TOKEN",
+            "adapter_version": "adapter-v1",
+            "trace_level": "minimal",
+            "timeout_seconds": 5,
+            "retry_count": 1,
+            "enabled": False,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["credential_ref"] == "RAG_ADAPTER_TOKEN"
+    assert "token" not in response.json()
+    listed = await client.get(f"/api/projects/{seed.project_id}/adapters")
+    assert listed.status_code == 200
+    assert listed.json()[0]["name"] == "本地 RAG"
+    async with session_factory() as session:
+        stored = await session.scalar(select(AdapterConfig))
+        assert stored is not None
+        assert stored.token_last4 is None
