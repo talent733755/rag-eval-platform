@@ -64,7 +64,9 @@ def test_worker_heartbeat_must_be_positive_and_shorter_than_lease() -> None:
         )
 
 
-def test_worker_runtime_settings_accept_uppercase_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_runtime_settings_accept_uppercase_environment_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     values = {
         "WORKER_POLL_INTERVAL_SECONDS": "1.5",
         "WORKER_HEARTBEAT_INTERVAL_SECONDS": "2",

@@ -145,7 +145,9 @@ async def test_postgres_worker_processes_two_jobs_once_concurrently(
         jobs = list(
             (
                 await session.scalars(
-                    select(IngestionJob).where(IngestionJob.id.in_([item.job_id for item in seeded]))
+                    select(IngestionJob).where(
+                        IngestionJob.id.in_([item.job_id for item in seeded])
+                    )
                 )
             ).all()
         )

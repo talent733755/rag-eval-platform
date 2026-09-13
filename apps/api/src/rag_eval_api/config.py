@@ -263,7 +263,9 @@ class Settings(BaseSettings):
         Field(
             ge=0.1,
             le=60,
-            validation_alias=AliasChoices("WORKER_POLL_INTERVAL_SECONDS", "worker_poll_interval_seconds"),
+            validation_alias=AliasChoices(
+                "WORKER_POLL_INTERVAL_SECONDS", "worker_poll_interval_seconds"
+            ),
         ),
     ] = DEFAULT_WORKER_POLL_INTERVAL_SECONDS
     worker_heartbeat_interval_seconds: Annotated[
