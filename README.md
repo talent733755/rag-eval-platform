@@ -20,17 +20,17 @@
 - `apps/api`：FastAPI API、健康检查、项目与成员基础接口、SQLAlchemy/Alembic 数据层和结构化错误响应；
 - `apps/api/src/rag_eval_api/storage`：私有、原子、不可覆盖的 LocalBlobStore；
 - `apps/api/src/rag_eval_api/parsers`：PDF、DOCX、Markdown、UTF-8 文本的有界解析器与 canonical chunk 契约；
-- `apps/web`：Next.js 管理后台壳层、权限感知菜单、项目切换器和占位业务页面；
+- `apps/web`：Next.js 管理后台、权限感知菜单、项目切换器、文档库和评测集页面；
 - `apps/web/src/lib/api/generated.ts`：由 FastAPI OpenAPI 文档生成的 TypeScript 类型；
 - `docker-compose.yml`：PostgreSQL、Redis、独立 Worker、API 和 Web 的本地容器编排；
 - `.github/workflows/ci.yml`：API/Web 质量门禁、本地集成检查、OpenAPI client diff 校验和 Playwright smoke；
 - `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
 
-当前版本已具备文档导入基础、持久化解析 Worker 运行时和管理后台壳；候选评测集工厂、Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断和真实认证仍按后续公共契约逐步加入。
+当前版本已具备文档导入基础、持久化解析 Worker 运行时、候选评测集版本审核/发布基础和管理后台页面；Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断和真实认证仍按后续公共契约逐步加入。
 
 当前文档摄取阶段已经完成 BlobStore、解析器基础设施、单文件 HTTP 上传入口，以及
 文档/版本读取、显式版本上传、解析重试和任务查询/取消 API，以及独立持久化 Worker；候选生成
-和 Documents 管理页面仍在后续切片中。直接调用解析器的最小本地示例（不会联网，也
+在未配置 Provider 时会明确返回 `provider_not_configured`，不会伪造候选数据。直接调用解析器的最小本地示例（不会联网，也
 不会调用模型）如下：
 
 ```python
