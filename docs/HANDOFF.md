@@ -3,7 +3,7 @@
 > 更新时间：2026-09-13
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：`cce1f33`（开发服务端口与 Web 访问配置）
+> 当前提交：请以 `git log -1 --oneline` 为准（开发认证与本地种子数据切片）
 
 ## 1. 接续规则
 
@@ -123,6 +123,8 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
 - 真实 PostgreSQL/Redis/Worker 集成测试：`6 passed, 251 deselected`，包含迁移头、真实 LocalBlobStore
   并发版本上传、Worker 并发解析闭环和 readiness；
+- 开发认证切片：`DEV_ACTOR_ID` 仅在 development 生效，种子脚本幂等创建本地组织、项目和管理员
+  membership；认证边界测试通过，运行态 `/api/projects` 返回 200，生产仍保持 501 fail-closed；
 
 当前文档摄取基础、候选生成、实验、指标、Trace/失败回归和设置页已完成对应 MVP 切片；本分支
 仍未合并回 `main`，但最新提交已推送远程。

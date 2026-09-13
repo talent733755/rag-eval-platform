@@ -85,7 +85,7 @@ Run: `git diff --check && make lint && make typecheck && make test && make build
 
 Expected: all commands exit 0; existing production 501 regression remains green.
 
-- [ ] **Step 3: Commit in Chinese and push the branch.**
+- [x] **Step 3: Commit in Chinese and push the branch.**
 
 ```bash
 git add apps/api/src/rag_eval_api/auth/context.py apps/api/src/rag_eval_api/config.py apps/api/tests/test_authentication.py apps/api/tests/test_config.py docker-compose.yml .env.example scripts/seed-dev-data.py README.md docs/security/authentication.md docs/operations/runbook.md docs/HANDOFF.md docs/superpowers/plans/2026-09-13-development-authentication.md
