@@ -1,9 +1,9 @@
 # 项目接手文件
 
-> 更新时间：2026-09-12
+> 更新时间：2026-09-13
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：当前分支最新提交（持久化解析 Worker 核心）
+> 当前提交：`9ac126b`（开源发布治理与迁移回归）
 
 ## 1. 接续规则
 
@@ -13,7 +13,7 @@
 Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共契约、异常处理、测试、
 安全、可观测性、许可证、CI 和文档都必须同步演进。
 
-当前分支是独立 worktree，尚未合并回 `main`，也没有要求再次 push 远程仓库。
+当前分支是独立 worktree，尚未合并回 `main`；最新提交已推送到同名远程分支。
 
 ## 2. 已完成内容
 
@@ -123,7 +123,8 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
 - 真实 PostgreSQL 集成测试：`5 passed, 181 deselected`，包含真实 LocalBlobStore 的并发版本上传闭环；
 
-当前切片工作树干净；本分支仍未合并回 `main`，也未推送远程。
+当前文档摄取基础、候选生成、实验、指标、Trace/失败回归和设置页已完成对应 MVP 切片；本分支
+仍未合并回 `main`，但最新提交已推送远程。
 
 ## 4. 尚未完成且必须先处理的阻断项
 
@@ -137,7 +138,9 @@ Documents UI。
 2. **测试缺口**：跨组织、并发唯一冲突与 worker 端到端 PostgreSQL 覆盖仍需扩充；SQLite
    不能替代 PostgreSQL 约束/并发集成测试。
 
-下一步建议：补齐 worker 进程入口、心跳/批量循环和 Compose 集成，再进入 Documents UI。
+下一步建议：先修复 Docker Hub pinned Python 基础镜像的 403，完成 Worker 镜像构建、readiness、
+PostgreSQL integration 和 Playwright；随后处理真实 OIDC/JWT、有限重试/取消中断、成本费率和
+检索证据契约等产品缺口。
 
 ## 5. 下一阶段路线
 
@@ -177,5 +180,13 @@ uv run --directory apps/api pytest -m 'not integration' -q
 make lint typecheck test build
 ```
 
-修复上传 API 时遵循 TDD：先新增一个能准确表达阻断问题的失败测试，确认红灯，再写最小
-实现，最后跑相关测试、全量门禁和独立双人评审。不要 push 或合并，除非用户明确要求。
+本轮最新验证：根目录 `make lint`、`make typecheck`、`make test`、`make build` 全部通过；API
+`246 passed, 2 skipped, 6 deselected`，Web `66 passed`。官方 npm audit（使用
+`https://registry.npmjs.org`）和 Python `pip-audit --skip-editable --strict --local` 均无已知漏洞。
+`make test-integration` 已在隔离 Compose 中完成 PostgreSQL/Redis 启动和 Alembic `0014` 空库迁移，
+但 Worker 构建因 `python:3.12-slim-bookworm@sha256:782412...` 从 Docker Hub 返回 `403 Forbidden`
+而停止；Worker readiness、API integration 和 Playwright 尚未执行。此前修复的迁移回归包括 `0005`
+check constraint 字面命名和 `0012/0013/0014` asyncpg 多语句执行问题。
+
+继续修复代码时遵循 TDD：先新增能准确表达问题的失败测试，确认红灯，再写最小实现，最后跑相关
+测试、全量门禁和独立评审。不要把 `.docker/`、`.env`、构建产物或测试数据提交到仓库。

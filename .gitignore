@@ -6,6 +6,7 @@
 !.env.example
 node_modules/
 .pnpm-store/
+.docker/
 dist/
 build/
 .next/
