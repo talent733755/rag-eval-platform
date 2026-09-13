@@ -138,6 +138,7 @@
 
 - 已完成 Task 1 Step 1–4：候选生成快照幂等、generation job 复合引用、独立 Candidate Worker、Provider 配置接入和租约 fencing。
 - 已验证：API 非集成测试 `222 passed, 2 skipped, 6 deselected`；候选/文档定向测试 `29 passed`；Web `lint`、`typecheck`、Vitest `58 passed`。
+- 最新门禁：`make lint && make typecheck && make test && make build` 全部通过；API `229 passed, 2 skipped, 6 deselected`，Web `62 passed`，生产构建成功。
 - 当前进行中：Task 1 Step 5 和 Task 2，重点是数据集分页/统一错误契约、文档任务状态轮询和候选审核 Web 闭环。
 - 本轮新增：候选审核页面、审核 reducer、文档详情抽屉和文档/任务操作 typed client；任务轮询、重试交互、数据集分页仍未完成。
 - 本轮新增：Python SDK Adapter 子进程隔离、Adapter 配置迁移/API/页面；连接测试和完整 CRUD 仍未完成。
