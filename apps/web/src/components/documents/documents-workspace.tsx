@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DataCard } from "@/components/ui/data-card";
 import { DocumentDetailDrawer } from "@/components/documents/document-detail-drawer";
@@ -35,8 +35,10 @@ export function DocumentsWorkspace() {
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [jobIds, setJobIds] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const client = useMemo(() => createApiClient(), []);
+  const refreshDocuments = useCallback(() => setRefreshNonce((current) => current + 1), []);
 
   useEffect(() => {
     if (!projectId) return;
@@ -72,6 +74,13 @@ export function DocumentsWorkspace() {
     setUploadMessage(null);
     try {
       const result = await client.uploadDocuments(projectId, Array.from(files));
+      setJobIds((current) => {
+        const next = { ...current };
+        for (const item of result.items) {
+          if (item.response) next[item.response.document.id] = item.response.ingestion_job.id;
+        }
+        return next;
+      });
       const failed = result.items.filter((item) => item.status === "failed");
       setUploadState(failed.length ? "error" : "success");
       setUploadMessage(failed.length ? `${failed.length} 个文件上传失败，请查看详情。` : `已提交 ${result.items.length} 个文件，解析任务已排队。`);
@@ -132,7 +141,7 @@ export function DocumentsWorkspace() {
           </div>
         )}
       </section>
-      {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} onClose={() => setSelectedDocumentId(null)} onChanged={() => setRefreshNonce((current) => current + 1)} />}
+      {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} jobId={jobIds[selectedDocumentId]} onClose={() => setSelectedDocumentId(null)} onChanged={refreshDocuments} />}
     </div>
   );
 }
