@@ -68,8 +68,8 @@
 - [x] **Step 1: 写契约和隔离测试。** 已覆盖 entry point 返回协议、异常/超时/超大响应分类和不泄露凭据；版本协商和取消回归将在实验执行器统一补齐。
 - [x] **Step 2: 实现 Python SDK Adapter。** 已使用 spawn 子进程加载受信任的已安装 entry point，限制执行时长、异常边界和返回体大小；不执行用户提交源码。
 - [x] **Step 3: 持久化 Adapter 配置。** 已保存 endpoint、环境变量凭据引用、timeout、retry、adapter version、trace level、enabled、last_test 状态；明文 key 不进入数据库/API。
-- [ ] **Step 4: 增加 CRUD/连接测试 API 和页面。** 已有列表/创建 API 和配置页；连接测试、更新/删除和实验启动前 `adapter_unavailable` 校验待完成。
-- [ ] **Step 5: 验证并提交。** 提交 `feat: 完成HTTP与Python Adapter管理`。
+- [x] **Step 4: 增加 CRUD/连接测试 API 和页面。** 已补齐项目作用域详情、编辑、管理员删除、HTTP 合成连接测试和 `last_test_status` 持久化；Python 连接测试在未配置受信任 entry point 时明确返回 `adapter_test_unsupported`。
+- [x] **Step 5: 验证并提交。** API CRUD/失败状态测试、Web API client/工作台测试、OpenAPI 重新生成已完成；实验启动前 `adapter_unavailable` 校验随 Task 4 完成。
 
 ## Task 4：完成模型服务和实验配置快照
 
@@ -144,4 +144,5 @@
 - 本轮新增：Python SDK Adapter 子进程隔离、Adapter 配置迁移/API/页面；连接测试和完整 CRUD 仍未完成。
 - 本轮新增：模型 Provider 配置迁移/API 与不可变实验快照服务；实验实体、启动校验和可恢复执行器仍未完成。
 - 本轮新增：文档详情任务轮询、完成/失败/取消状态、重试和取消交互；Task 2 剩余评测集分页和完整状态 reducer 仍未完成。
+- 本轮新增：Adapter 项目作用域 CRUD、HTTP 合成连接测试和前端操作；实验启动前 Adapter 可用性校验仍待 Task 4。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

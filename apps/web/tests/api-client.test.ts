@@ -106,4 +106,22 @@ describe("API client", () => {
     expect(init?.body).toContain("RAG_TOKEN");
     expect(init?.body).not.toContain("secret-value");
   });
+
+  it("updates, tests, fetches, and deletes an adapter through the typed client", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "adapter-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "adapter-1", last_test_status: "succeeded" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "https://api.example.test", fetchImpl });
+
+    await client.updateAdapter("project-id", "adapter-1", { name: "新名称" });
+    await client.testAdapter("project-id", "adapter-1");
+    await client.deleteAdapter("project-id", "adapter-1");
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.example.test/api/projects/project-id/adapters/adapter-1");
+    expect(fetchImpl.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "PATCH" }));
+    expect(fetchImpl.mock.calls[1]?.[0]).toContain("/adapters/adapter-1/test");
+    expect(fetchImpl.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(fetchImpl.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
 });

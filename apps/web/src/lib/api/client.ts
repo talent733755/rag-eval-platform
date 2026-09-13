@@ -16,6 +16,7 @@ type CandidateGenerationRequest = components["schemas"]["CandidateGenerationRequ
 type CandidateGenerationJobResponse = components["schemas"]["CandidateGenerationJobResponse"];
 type AdapterConfig = components["schemas"]["AdapterConfigResponse"];
 type AdapterConfigCreate = components["schemas"]["AdapterConfigCreate"];
+type AdapterConfigUpdate = components["schemas"]["AdapterConfigUpdate"];
 
 type ErrorEnvelope = {
   error?: {
@@ -65,6 +66,10 @@ export type ApiClient = {
   generateCandidates(projectId: string, documentId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
   listAdapters(projectId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig[]>;
   createAdapter(projectId: string, payload: AdapterConfigCreate, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
+  getAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
+  updateAdapter(projectId: string, adapterId: string, payload: AdapterConfigUpdate, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
+  deleteAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<void>;
+  testAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
 };
 
 export function createApiClient({
@@ -203,6 +208,30 @@ export function createApiClient({
         { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
       );
     },
+    async getAdapter(projectId, adapterId, options) {
+      return requestJson<AdapterConfig>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters/${encodeURIComponent(adapterId)}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async updateAdapter(projectId, adapterId, payload, options) {
+      return requestJson<AdapterConfig>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters/${encodeURIComponent(adapterId)}`,
+        { method: "PATCH", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
+      );
+    },
+    async deleteAdapter(projectId, adapterId, options) {
+      await requestNoContent(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters/${encodeURIComponent(adapterId)}`,
+        { method: "DELETE", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async testAdapter(projectId, adapterId, options) {
+      return requestJson<AdapterConfig>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters/${encodeURIComponent(adapterId)}/test`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
   };
 }
 
@@ -230,6 +259,20 @@ async function requestJson<T>(url: string, init: RequestInit, fetchImpl: FetchLi
   }
 
   return (await response.json()) as T;
+}
+
+async function requestNoContent(url: string, init: RequestInit, fetchImpl: FetchLike): Promise<void> {
+  const response = await fetchImpl(url, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...init.headers,
+    },
+  });
+
+  if (!response.ok) {
+    throw await createApiError(response);
+  }
 }
 
 async function createApiError(response: Response): Promise<ApiError> {

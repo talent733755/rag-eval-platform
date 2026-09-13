@@ -50,6 +50,7 @@ class AdapterConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     endpoint: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     credential_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entrypoint_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     token_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     adapter_version: Mapped[str] = mapped_column(String(100), nullable=False)
     trace_level: Mapped[str] = mapped_column(String(20), nullable=False, default="minimal")

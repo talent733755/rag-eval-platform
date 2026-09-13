@@ -54,6 +54,7 @@ from rag_eval_api.storage.protocol import StoredBlob
 
 EDITOR_ID = UUID("00000000-0000-0000-0000-000000000201")
 VIEWER_ID = UUID("00000000-0000-0000-0000-000000000202")
+ADMIN_ID = UUID("00000000-0000-0000-0000-000000000203")
 
 
 class OversizedRequestBody(httpx.AsyncByteStream):
@@ -142,6 +143,7 @@ async def document_api_environment() -> AsyncIterator[
         [
             Membership(organization=organization, user_id=EDITOR_ID, role=MembershipRole.editor),
             Membership(organization=organization, user_id=VIEWER_ID, role=MembershipRole.viewer),
+            Membership(organization=organization, user_id=ADMIN_ID, role=MembershipRole.admin),
         ]
     )
     async with session_factory() as session:
@@ -966,6 +968,92 @@ async def test_editor_can_create_secret_free_adapter_configuration(
         stored = await session.scalar(select(AdapterConfig))
         assert stored is not None
         assert stored.token_last4 is None
+
+
+@pytest.mark.asyncio
+async def test_adapter_crud_is_project_scoped_and_admin_delete_is_audited(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    created = await client.post(
+        f"/api/projects/{seed.project_id}/adapters",
+        json={
+            "name": "可更新 Adapter",
+            "kind": "http",
+            "endpoint": "https://adapter.example.test",
+            "adapter_version": "adapter-v1",
+        },
+    )
+    assert created.status_code == 201
+    adapter_id = created.json()["id"]
+
+    updated = await client.patch(
+        f"/api/projects/{seed.project_id}/adapters/{adapter_id}",
+        json={"name": "已更新 Adapter", "timeout_seconds": 10},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "已更新 Adapter"
+    fetched = await client.get(f"/api/projects/{seed.project_id}/adapters/{adapter_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["name"] == "已更新 Adapter"
+
+    set_actor(ADMIN_ID)
+    deleted = await client.delete(f"/api/projects/{seed.project_id}/adapters/{adapter_id}")
+    assert deleted.status_code == 204
+    fetched_after_delete = await client.get(
+        f"/api/projects/{seed.project_id}/adapters/{adapter_id}"
+    )
+    assert fetched_after_delete.status_code == 404
+    async with session_factory() as session:
+        audit = await session.scalar(
+            select(AuditEvent).where(
+                AuditEvent.action == "adapter.deleted",
+                AuditEvent.resource_id == adapter_id,
+            )
+        )
+        assert audit is not None
+
+
+@pytest.mark.asyncio
+async def test_adapter_connection_test_records_failure_without_leaking_credentials(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    created = await client.post(
+        f"/api/projects/{seed.project_id}/adapters",
+        json={
+            "name": "缺少凭据 Adapter",
+            "kind": "http",
+            "endpoint": "https://adapter.example.test",
+            "credential_ref": "MISSING_RAG_ADAPTER_TOKEN",
+            "adapter_version": "adapter-v1",
+        },
+    )
+    adapter_id = created.json()["id"]
+    tested = await client.post(
+        f"/api/projects/{seed.project_id}/adapters/{adapter_id}/test"
+    )
+    assert tested.status_code == 503
+    assert tested.json()["error"]["code"] == "adapter_credentials_unavailable"
+    assert "MISSING_RAG_ADAPTER_TOKEN" not in tested.text
+    async with session_factory() as session:
+        stored = await session.get(AdapterConfig, UUID(adapter_id))
+        assert stored is not None
+        assert stored.last_test_status.value == "failed"
 
 
 @pytest.mark.asyncio

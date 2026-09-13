@@ -57,6 +57,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/adapters/{adapter_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Adapter */
+        get: operations["get_adapter_api_projects__project_id__adapters__adapter_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Adapter */
+        delete: operations["delete_adapter_api_projects__project_id__adapters__adapter_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Adapter */
+        patch: operations["update_adapter_api_projects__project_id__adapters__adapter_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/adapters/{adapter_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Adapter */
+        post: operations["test_adapter_api_projects__project_id__adapters__adapter_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/candidate-datasets": {
         parameters: {
             query?: never;
@@ -405,6 +441,24 @@ export interface paths {
         patch: operations["update_project_member_api_projects__project_id__members__membership_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/model-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Providers */
+        get: operations["list_model_providers_api_projects__project_id__model_providers_get"];
+        put?: never;
+        /** Create Model Provider */
+        post: operations["create_model_provider_api_projects__project_id__model_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -456,6 +510,8 @@ export interface components {
             enabled: boolean;
             /** Endpoint */
             endpoint?: string | null;
+            /** Entrypoint Ref */
+            entrypoint_ref?: string | null;
             /**
              * Kind
              * @enum {string}
@@ -495,6 +551,8 @@ export interface components {
             enabled: boolean;
             /** Endpoint */
             endpoint: string | null;
+            /** Entrypoint Ref */
+            entrypoint_ref: string | null;
             /**
              * Id
              * Format: uuid
@@ -524,6 +582,29 @@ export interface components {
             token_last4: string | null;
             /** Trace Level */
             trace_level: string;
+        };
+        /** AdapterConfigUpdate */
+        AdapterConfigUpdate: {
+            /** Adapter Version */
+            adapter_version?: string | null;
+            /** Credential Ref */
+            credential_ref?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Endpoint */
+            endpoint?: string | null;
+            /** Entrypoint Ref */
+            entrypoint_ref?: string | null;
+            /** Kind */
+            kind?: ("http" | "python") | null;
+            /** Name */
+            name?: string | null;
+            /** Retry Count */
+            retry_count?: number | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+            /** Trace Level */
+            trace_level?: ("none" | "minimal" | "full") | null;
         };
         /** Body_archive_document_api_projects__project_id__documents__document_id__archive_post */
         Body_archive_document_api_projects__project_id__documents__document_id__archive_post: {
@@ -1110,6 +1191,64 @@ export interface components {
          * @enum {string}
          */
         MembershipRole: "admin" | "editor" | "viewer";
+        /** ModelProviderCreate */
+        ModelProviderCreate: {
+            /** Credential Ref */
+            credential_ref: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /** Endpoint */
+            endpoint: string;
+            /** Model Name */
+            model_name: string;
+            /** Name */
+            name: string;
+            /**
+             * Timeout Seconds
+             * @default 30
+             */
+            timeout_seconds: number;
+        };
+        /** ModelProviderResponse */
+        ModelProviderResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Credential Ref */
+            credential_ref: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Endpoint */
+            endpoint: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Test Status */
+            last_test_status: string;
+            /** Model Name */
+            model_name: string;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Description */
@@ -1300,6 +1439,136 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_adapter_api_projects__project_id__adapters__adapter_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adapter_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_adapter_api_projects__project_id__adapters__adapter_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adapter_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_adapter_api_projects__project_id__adapters__adapter_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adapter_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdapterConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdapterConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_adapter_api_projects__project_id__adapters__adapter_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adapter_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2087,6 +2356,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_model_providers_api_projects__project_id__model_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProviderResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_model_provider_api_projects__project_id__model_providers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProviderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProviderResponse"];
                 };
             };
             /** @description Validation Error */

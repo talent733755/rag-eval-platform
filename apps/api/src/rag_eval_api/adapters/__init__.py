@@ -12,6 +12,7 @@ from rag_eval_api.adapters.protocol import (
     Usage,
 )
 from rag_eval_api.adapters.python_sdk import PythonSdkAdapter
+from rag_eval_api.adapters.registry import load_python_adapter
 
 __all__ = [
     "ADAPTER_CAPABILITY_VERSION",
@@ -24,4 +25,5 @@ __all__ = [
     "Usage",
     "HttpAdapter",
     "PythonSdkAdapter",
+    "load_python_adapter",
 ]
