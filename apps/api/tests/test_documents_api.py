@@ -71,7 +71,7 @@ class OversizedRequestBody(httpx.AsyncByteStream):
             b'--untrusted\r\nContent-Disposition: form-data; name="file"; '
             b'filename="payload.md"\r\nContent-Type: text/markdown\r\n\r\nok'
         )
-        yield b"y" * 200
+        yield b"y" * 5_000
 
 
 @dataclass
@@ -171,7 +171,7 @@ async def document_api_environment() -> AsyncIterator[
         log_level="INFO",
         secret_key=SecretStr(DEFAULT_SECRET_KEY),
         max_upload_bytes=32,
-        max_request_body_bytes=256,
+        max_request_body_bytes=4_096,
         _env_file=None,  # type: ignore[call-arg]
     )
     application = create_app(settings=settings)
@@ -1234,3 +1234,89 @@ async def test_experiment_draft_requires_published_dataset_and_available_depende
         assert validated.dataset_item_count == 2
         assert validated.adapter_version == "adapter-v1"
         assert validated.random_seed == 42
+
+
+@pytest.mark.asyncio
+async def test_experiment_create_freezes_snapshot_and_start_requires_accepted_items(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    async with session_factory() as session:
+        dataset = CandidateDataset(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="可运行评测集",
+            status=CandidateDatasetStatus.published,
+        )
+        version = CandidateDatasetVersion(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset=dataset,
+            version_number=1,
+            status=CandidateDatasetStatus.published,
+            item_count=1,
+            created_by=EDITOR_ID,
+        )
+        adapter = AdapterConfig(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="可运行 Adapter",
+            kind=AdapterKind.http,
+            endpoint="https://adapter.example.test",
+            adapter_version="adapter-v1",
+            trace_level="minimal",
+            timeout_seconds=30,
+            retry_count=0,
+            enabled=True,
+            last_test_status=AdapterTestStatus.succeeded,
+        )
+        provider = ModelProviderConfig(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="可运行模型",
+            endpoint="https://model.example.test",
+            credential_ref="MODEL_TOKEN",
+            model_name="model-a",
+            timeout_seconds=30,
+            enabled=True,
+        )
+        session.add_all([dataset, version, adapter, provider])
+        await session.commit()
+        version_id, adapter_id, provider_id = version.id, adapter.id, provider.id
+
+    payload = {
+        "name": "可复现实验",
+        "dataset_version_id": str(version_id),
+        "adapter_config_id": str(adapter_id),
+        "model_provider_id": str(provider_id),
+        "metric_versions": {"retrieval": "v1"},
+        "parameters": {"top_k": 5},
+        "random_seed": 7,
+    }
+    created = await client.post(
+        f"/api/projects/{seed.project_id}/experiments",
+        headers={"Idempotency-Key": "experiment-1"},
+        json=payload,
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "draft"
+    assert len(created.json()["environment_hash"]) == 64
+    replayed = await client.post(
+        f"/api/projects/{seed.project_id}/experiments",
+        headers={"Idempotency-Key": "experiment-1"},
+        json=payload,
+    )
+    assert replayed.status_code == 201
+    assert replayed.json()["id"] == created.json()["id"]
+    started = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/{created.json()['id']}/start"
+    )
+    assert started.status_code == 409
+    assert started.json()["error"]["code"] == "dataset_has_no_accepted_items"

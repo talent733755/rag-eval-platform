@@ -80,6 +80,7 @@ class Experiment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("id", "organization_id", "project_id", name="uq_experiments_tenant"),
+        UniqueConstraint("organization_id", "project_id", "idempotency_key", name="uq_experiments_idempotency"),
         CheckConstraint("length(trim(name)) > 0", name="experiment_name_nonempty"),
         CheckConstraint("total_units >= 0 AND completed_units >= 0", name="experiment_units_nonnegative"),
         CheckConstraint("succeeded_units >= 0 AND failed_units >= 0 AND skipped_units >= 0", name="experiment_results_nonnegative"),
@@ -89,6 +90,7 @@ class Experiment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ExperimentStatus] = mapped_column(SqlEnum(ExperimentStatus, name="experiment_status", native_enum=False, create_constraint=True), nullable=False, default=ExperimentStatus.draft)
     dataset_version_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     adapter_config_id: Mapped[UUID] = mapped_column(nullable=False, index=True)

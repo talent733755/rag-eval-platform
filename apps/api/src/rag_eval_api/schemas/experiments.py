@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,3 +33,54 @@ class ValidatedExperimentDraft(BaseModel):
     metric_versions: dict[str, str]
     parameters: dict[str, object]
     random_seed: int
+
+
+class ExperimentRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    experiment_id: UUID
+    status: str
+    total_units: int
+    completed_units: int
+    succeeded_units: int
+    failed_units: int
+    skipped_units: int
+    created_by: UUID
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExperimentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    organization_id: UUID
+    project_id: UUID
+    name: str
+    status: str
+    dataset_version_id: UUID
+    adapter_config_id: UUID
+    model_provider_id: UUID
+    metric_versions: dict[str, str]
+    parameters: dict[str, object]
+    random_seed: int
+    configuration_snapshot: dict[str, object]
+    environment_hash: str
+    total_units: int
+    completed_units: int
+    succeeded_units: int
+    failed_units: int
+    skipped_units: int
+    created_by: UUID
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExperimentStartResponse(BaseModel):
+    experiment: ExperimentResponse
+    run: ExperimentRunResponse
