@@ -75,8 +75,8 @@
 
 **Files:** `apps/api/src/rag_eval_api/models/model_providers.py`, `apps/api/alembic/versions/0007_model_providers.py`, `apps/api/src/rag_eval_api/routes/model_providers.py`, `apps/api/src/rag_eval_api/services/experiment_snapshots.py`, `apps/api/src/rag_eval_api/schemas/experiments.py`, `apps/api/tests/test_model_providers.py`, `apps/api/tests/test_experiment_snapshots.py`, `docs/contracts/experiment-v1.md`
 
-- [ ] **Step 1:** 测试 provider key 的安全注入、末四位脱敏、连接测试不保存问题内容、快照包含 dataset version/adapter/model/metric versions 和运行环境。
-- [ ] **Step 2:** 实现模型服务 CRUD、能力测试和不可变配置引用；真实模型调用默认关闭，URL 继续复用安全 Transport。
+- [ ] **Step 1:** 已覆盖 provider 凭据引用缺失时的安全失败、连接测试不保存问题内容和快照环境 hash；实际 Token 只从进程环境注入，末四位展示留待接入安全凭据存储后实现。
+- [x] **Step 2:** 已实现模型服务项目作用域 CRUD、受限 Transport 能力测试和不可变配置引用；真实模型调用默认关闭，URL 复用安全 Transport。
 - [ ] **Step 3:** 实现实验草稿校验：dataset version 必须 published、Adapter 已测试可用、参数有界、随机种子明确；启动后配置冻结。
 - [ ] **Step 4:** 验证并提交 `feat: 增加模型服务与实验快照`。
 
@@ -145,4 +145,5 @@
 - 本轮新增：模型 Provider 配置迁移/API 与不可变实验快照服务；实验实体、启动校验和可恢复执行器仍未完成。
 - 本轮新增：文档详情任务轮询、完成/失败/取消状态、重试和取消交互；Task 2 剩余评测集分页和完整状态 reducer 仍未完成。
 - 本轮新增：Adapter 项目作用域 CRUD、HTTP 合成连接测试和前端操作；实验启动前 Adapter 可用性校验仍待 Task 4。
+- 本轮新增：Python Adapter trusted entry point registry 和模型 Provider CRUD/能力测试；实验实体、启动校验和模型/Adapter 完整快照引用仍待 Task 4/5。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

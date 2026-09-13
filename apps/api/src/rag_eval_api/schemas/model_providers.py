@@ -15,6 +15,15 @@ class ModelProviderCreate(BaseModel):
     enabled: bool = False
 
 
+class ModelProviderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    endpoint: str | None = Field(default=None, min_length=1, max_length=2048)
+    credential_ref: str | None = Field(default=None, min_length=1, max_length=255)
+    model_name: str | None = Field(default=None, min_length=1, max_length=255)
+    timeout_seconds: float | None = Field(default=None, gt=0, le=300)
+    enabled: bool | None = None
+
+
 class ModelProviderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

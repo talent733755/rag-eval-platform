@@ -1089,3 +1089,50 @@ async def test_editor_can_create_secret_free_model_provider_configuration(
         assert (
             await session.scalar(select(ModelProviderConfig))
         ).credential_ref == "MODEL_API_TOKEN"
+
+
+@pytest.mark.asyncio
+async def test_model_provider_crud_and_connection_failure_are_tenant_scoped(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    created = await client.post(
+        f"/api/projects/{seed.project_id}/model-providers",
+        json={
+            "name": "待测试模型",
+            "endpoint": "https://model.example.test",
+            "credential_ref": "MISSING_MODEL_PROVIDER_TOKEN",
+            "model_name": "model-a",
+        },
+    )
+    assert created.status_code == 201
+    provider_id = created.json()["id"]
+    updated = await client.patch(
+        f"/api/projects/{seed.project_id}/model-providers/{provider_id}",
+        json={"model_name": "model-b"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["model_name"] == "model-b"
+    tested = await client.post(
+        f"/api/projects/{seed.project_id}/model-providers/{provider_id}/test"
+    )
+    assert tested.status_code == 503
+    assert tested.json()["error"]["code"] == "provider_credentials_unavailable"
+    assert "MISSING_MODEL_PROVIDER_TOKEN" not in tested.text
+    async with session_factory() as session:
+        stored = await session.get(ModelProviderConfig, UUID(provider_id))
+        assert stored is not None
+        assert stored.last_test_status.value == "failed"
+
+    set_actor(ADMIN_ID)
+    deleted = await client.delete(
+        f"/api/projects/{seed.project_id}/model-providers/{provider_id}"
+    )
+    assert deleted.status_code == 204
