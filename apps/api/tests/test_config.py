@@ -14,6 +14,12 @@ def test_document_ingestion_defaults_are_safe_and_provider_is_opt_in() -> None:
     assert settings.provider_base_url is None
     assert settings.provider_api_key is None
     assert settings.worker_lease_ttl_seconds == 60
+    assert settings.worker_poll_interval_seconds == 5.0
+    assert settings.worker_heartbeat_interval_seconds == 20.0
+    assert settings.worker_readiness_file == "/tmp/rag-eval-worker-ready"
+    assert settings.orphan_blob_grace_seconds == 3600
+    assert settings.worker_redis_hint_channel == "rag-eval:worker:hints"
+    assert settings.worker_enabled is True
     assert settings.parser_limits().max_docx_compression_ratio == 100
     assert settings.max_parser_output_bytes == 64 * 1024 * 1024
     assert settings.parser_runner().max_output_bytes == 64 * 1024 * 1024
@@ -30,6 +36,54 @@ def test_request_body_budget_covers_upload_and_multipart_overhead() -> None:
 
     with pytest.raises(ValueError, match="MAX_REQUEST_BODY_BYTES"):
         Settings(_env_file=None, max_upload_bytes=32, max_request_body_bytes=31)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("worker_poll_interval_seconds", 0.09),
+        ("worker_poll_interval_seconds", 60.01),
+        ("orphan_blob_grace_seconds", 3599),
+        ("worker_readiness_file", "relative/ready"),
+        ("worker_redis_hint_channel", "   "),
+    ],
+)
+def test_worker_runtime_settings_reject_unsafe_values(field: str, value: object) -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, **{field: value})
+
+
+def test_worker_heartbeat_must_be_positive_and_shorter_than_lease() -> None:
+    with pytest.raises(ValueError, match="WORKER_HEARTBEAT_INTERVAL_SECONDS"):
+        Settings(_env_file=None, worker_heartbeat_interval_seconds=0)
+    with pytest.raises(ValueError, match="less than lease TTL"):
+        Settings(
+            _env_file=None,
+            worker_lease_ttl_seconds=10,
+            worker_heartbeat_interval_seconds=10,
+        )
+
+
+def test_worker_runtime_settings_accept_uppercase_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "WORKER_POLL_INTERVAL_SECONDS": "1.5",
+        "WORKER_HEARTBEAT_INTERVAL_SECONDS": "2",
+        "WORKER_READINESS_FILE": "/run/rag-eval/worker-ready",
+        "ORPHAN_BLOB_GRACE_SECONDS": "7200",
+        "WORKER_REDIS_HINT_CHANNEL": "custom:worker:hints",
+        "WORKER_ENABLED": "false",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.worker_poll_interval_seconds == 1.5
+    assert settings.worker_heartbeat_interval_seconds == 2.0
+    assert settings.worker_readiness_file == "/run/rag-eval/worker-ready"
+    assert settings.orphan_blob_grace_seconds == 7200
+    assert settings.worker_redis_hint_channel == "custom:worker:hints"
+    assert settings.worker_enabled is False
 
 
 @pytest.mark.parametrize("value", [1024 * 1024 - 1, 1024 * 1024 * 1024 + 1])

@@ -30,7 +30,7 @@ from rag_eval_api.models import (
 )
 from rag_eval_api.parsers.errors import MalformedDocumentError
 from rag_eval_api.parsers.models import CanonicalChunk, ParseResult
-from rag_eval_api.services.worker import IngestionWorker
+from rag_eval_api.services.worker import IngestionWorker, MaintenanceResult, WorkerBatchResult
 from rag_eval_api.storage.local import LocalBlobStore
 
 
@@ -238,3 +238,47 @@ async def test_worker_requeues_expired_lease_and_increments_fencing_token(
     assert lease is not None and lease.fencing_token == 2
     assert len(attempts) == 1
     assert attempts[0].attempt_number == 2
+
+
+@pytest.mark.asyncio
+async def test_worker_heartbeat_renews_only_the_current_lease(
+    worker_fixture: WorkerFixture,
+) -> None:
+    worker = IngestionWorker(
+        session_factory=worker_fixture.session_factory,
+        blob_store=worker_fixture.blob_store,
+        parser_registry=SuccessfulParser(),  # type: ignore[arg-type]
+        worker_id="worker-test",
+        lease_ttl=timedelta(seconds=60),
+    )
+
+    claim = await worker._claim_next()
+    assert claim is not None
+
+    assert await worker.heartbeat(claim.job_id, claim.lease_id, claim.fencing_token) is True
+    assert await worker.heartbeat(claim.job_id, claim.lease_id, claim.fencing_token + 1) is False
+
+
+@pytest.mark.asyncio
+async def test_worker_process_batch_and_maintenance_return_structured_counts(
+    worker_fixture: WorkerFixture,
+) -> None:
+    worker = IngestionWorker(
+        session_factory=worker_fixture.session_factory,
+        blob_store=worker_fixture.blob_store,
+        parser_registry=SuccessfulParser(),  # type: ignore[arg-type]
+        worker_id="worker-test",
+        orphan_blob_grace_period=timedelta(hours=1),
+    )
+
+    batch = await worker.process_batch(2)
+    maintenance = await worker.run_maintenance()
+
+    assert isinstance(batch, WorkerBatchResult)
+    assert batch.processed == 1
+    assert batch.succeeded == 1
+    assert batch.failed == 0
+    assert isinstance(maintenance, MaintenanceResult)
+    assert maintenance.recovered_jobs == 0
+    assert maintenance.failed_count == 0
+    assert maintenance.duration_ms >= 0

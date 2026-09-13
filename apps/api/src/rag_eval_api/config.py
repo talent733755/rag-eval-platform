@@ -34,6 +34,11 @@ REQUEST_BODY_OVERHEAD_BYTES = 1024 * 1024
 DEFAULT_MAX_REQUEST_BODY_BYTES = DEFAULT_MAX_UPLOAD_BYTES + REQUEST_BODY_OVERHEAD_BYTES
 DEFAULT_MAX_PARSE_PAGES = 10_000
 DEFAULT_MAX_NORMALIZED_CHARACTERS = 200_000
+DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
+DEFAULT_WORKER_HEARTBEAT_INTERVAL_SECONDS = 20.0
+DEFAULT_WORKER_READINESS_FILE = "/tmp/rag-eval-worker-ready"
+DEFAULT_ORPHAN_BLOB_GRACE_SECONDS = 3600
+DEFAULT_WORKER_REDIS_HINT_CHANNEL = "rag-eval:worker:hints"
 LOGGER_NAME = "rag_eval_api.request"
 SUPPORTED_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"})
 
@@ -253,16 +258,49 @@ class Settings(BaseSettings):
             validation_alias=AliasChoices("WORKER_LEASE_TTL_SECONDS", "worker_lease_ttl_seconds"),
         ),
     ] = 60
-    worker_heartbeat_interval_seconds: Annotated[
-        int,
+    worker_poll_interval_seconds: Annotated[
+        float,
         Field(
-            ge=1,
+            ge=0.1,
+            le=60,
+            validation_alias=AliasChoices("WORKER_POLL_INTERVAL_SECONDS", "worker_poll_interval_seconds"),
+        ),
+    ] = DEFAULT_WORKER_POLL_INTERVAL_SECONDS
+    worker_heartbeat_interval_seconds: Annotated[
+        float,
+        Field(
+            ge=0,
             le=120,
             validation_alias=AliasChoices(
                 "WORKER_HEARTBEAT_INTERVAL_SECONDS", "worker_heartbeat_interval_seconds"
             ),
         ),
-    ] = 20
+    ] = DEFAULT_WORKER_HEARTBEAT_INTERVAL_SECONDS
+    worker_readiness_file: Annotated[
+        str,
+        Field(
+            min_length=1,
+            validation_alias=AliasChoices("WORKER_READINESS_FILE", "worker_readiness_file"),
+        ),
+    ] = DEFAULT_WORKER_READINESS_FILE
+    orphan_blob_grace_seconds: Annotated[
+        int,
+        Field(
+            ge=3600,
+            validation_alias=AliasChoices("ORPHAN_BLOB_GRACE_SECONDS", "orphan_blob_grace_seconds"),
+        ),
+    ] = DEFAULT_ORPHAN_BLOB_GRACE_SECONDS
+    worker_redis_hint_channel: Annotated[
+        str,
+        Field(
+            min_length=1,
+            validation_alias=AliasChoices("WORKER_REDIS_HINT_CHANNEL", "worker_redis_hint_channel"),
+        ),
+    ] = DEFAULT_WORKER_REDIS_HINT_CHANNEL
+    worker_enabled: Annotated[
+        bool,
+        Field(validation_alias=AliasChoices("WORKER_ENABLED", "worker_enabled")),
+    ] = True
     provider_base_url: Annotated[
         str | None,
         Field(validation_alias=AliasChoices("PROVIDER_BASE_URL", "provider_base_url")),
@@ -407,6 +445,29 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_provider_api_key(cls, value: object) -> object:
         return None if value is None or value == "" else value
+
+    @field_validator("worker_readiness_file")
+    @classmethod
+    def validate_worker_readiness_file(cls, value: str) -> str:
+        normalized = value.strip()
+        if not os.path.isabs(normalized):
+            raise ValueError("WORKER_READINESS_FILE must be an absolute path")
+        return os.path.normpath(normalized)
+
+    @field_validator("worker_heartbeat_interval_seconds")
+    @classmethod
+    def validate_worker_heartbeat_interval(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("WORKER_HEARTBEAT_INTERVAL_SECONDS must be positive")
+        return value
+
+    @field_validator("worker_redis_hint_channel")
+    @classmethod
+    def validate_worker_redis_hint_channel(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("WORKER_REDIS_HINT_CHANNEL must not be empty")
+        return normalized
 
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
