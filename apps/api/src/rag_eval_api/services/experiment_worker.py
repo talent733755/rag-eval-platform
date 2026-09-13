@@ -26,7 +26,10 @@ from rag_eval_api.models import (
     ExperimentRunStatus,
     ExperimentStatus,
 )
+from rag_eval_api.services.failure_cases import persist_failure_case
 from rag_eval_api.services.metric_calculation import calculate_completed_run_metrics
+from rag_eval_api.services.trace_persistence import persist_trace
+from rag_eval_api.storage.protocol import BlobStore
 
 LOGGER = logging.getLogger(__name__)
 AdapterFactory = Callable[[AdapterConfig], Adapter]
@@ -66,6 +69,7 @@ class ExperimentWorker:
         adapter_factory: AdapterFactory,
         worker_id: str,
         lease_ttl: timedelta = timedelta(seconds=60),
+        blob_store: BlobStore | None = None,
     ) -> None:
         if not worker_id.strip() or len(worker_id) > 255:
             raise ValueError("worker_id must be 1 to 255 characters")
@@ -75,6 +79,7 @@ class ExperimentWorker:
         self.adapter_factory = adapter_factory
         self.worker_id = worker_id
         self.lease_ttl = lease_ttl
+        self.blob_store = blob_store
         self._shutdown_requested = False
 
     def request_shutdown(self) -> None:
@@ -342,11 +347,35 @@ class ExperimentWorker:
                 item.completed_at = now
                 item.error_code = error_code
                 item.error_message = error_message
+                persisted_trace_id = (
+                    response.trace.trace_id if response is not None and response.trace else None
+                )
+                if response is not None and response.trace is not None and not cancelled:
+                    try:
+                        persisted_trace = await persist_trace(
+                            session,
+                            organization_id=claim.organization_id,
+                            project_id=claim.project_id,
+                            experiment_id=claim.experiment_id,
+                            run_id=claim.run_id,
+                            run_item_id=claim.run_item_id,
+                            trace=response.trace,
+                            blob_store=self.blob_store,
+                        )
+                        persisted_trace_id = persisted_trace.trace_id
+                    except Exception:
+                        LOGGER.exception(
+                            "experiment trace persistence failed",
+                            extra={
+                                "event": "experiment.trace_failed",
+                                "run_item_id": str(claim.run_item_id),
+                            },
+                        )
                 if response is not None and not cancelled:
                     item.final_answer = response.answer
                     item.final_usage = response.usage.model_dump(mode="json")
                     item.final_latency_ms = response.usage.latency_ms
-                    item.final_trace_id = response.trace.trace_id if response.trace else None
+                    item.final_trace_id = persisted_trace_id
                 session.add(
                     ExperimentRunAttempt(
                         organization_id=claim.organization_id,
@@ -362,6 +391,18 @@ class ExperimentWorker:
                         created_at=now,
                     )
                 )
+                if final_status is ExperimentRunItemStatus.failed:
+                    await persist_failure_case(
+                        session,
+                        organization_id=claim.organization_id,
+                        project_id=claim.project_id,
+                        experiment_id=claim.experiment_id,
+                        run_id=claim.run_id,
+                        run_item_id=claim.run_item_id,
+                        attempt_number=claim.attempt_number,
+                        error_code=error_code,
+                        trace_id=persisted_trace_id,
+                    )
                 run.completed_units += 1
                 if final_status is ExperimentRunItemStatus.succeeded:
                     run.succeeded_units += 1

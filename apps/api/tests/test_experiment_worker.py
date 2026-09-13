@@ -26,6 +26,7 @@ from rag_eval_api.models import (
     ExperimentRunStatus,
     ExperimentStatus,
     MetricResult,
+    PersistedTrace,
 )
 from rag_eval_api.services.experiment_worker import ExperimentWorker
 from rag_eval_api.services.metric_calculation import calculate_completed_run_metrics
@@ -37,6 +38,11 @@ class FakeAdapter:
             request_id=request.request_id,
             answer="测试答案",
             usage={"latency_ms": 3},
+            trace={
+                "trace_id": "trace-worker-1",
+                "level": "minimal",
+                "stages": {"retrieve": {"ids": ["chunk-1"], "authorization": "do-not-store"}},
+            },
         )
 
 
@@ -73,6 +79,7 @@ async def test_experiment_worker_records_success_and_attempt_history(
             "success_rate": "engineering-v1",
             "answer_nonempty_rate": "generation-v1",
             "average_latency_ms": "engineering-v1",
+            "trace_coverage": "engineering-v1",
         },
         parameters={},
         random_seed=1,
@@ -157,6 +164,9 @@ async def test_experiment_worker_records_success_and_attempt_history(
                 )
             ).all()
         )
+        trace = await session.scalar(
+            select(PersistedTrace).where(PersistedTrace.run_item_id == run_item_id)
+        )
         assert stored_item is not None and stored_item.status is ExperimentRunItemStatus.succeeded
         assert stored_item.final_answer == "测试答案"
         assert stored_run is not None and stored_run.status is ExperimentRunStatus.succeeded
@@ -166,5 +176,9 @@ async def test_experiment_worker_records_success_and_attempt_history(
         assert by_key["success_rate"].value == 1
         assert by_key["answer_nonempty_rate"].value == 1
         assert by_key["average_latency_ms"].value == 3
+        assert by_key["trace_coverage"].value == 1
+        assert trace is not None
+        assert trace.trace_id == "trace-worker-1"
+        assert "authorization" not in str(trace.stages)
 
     assert await calculate_completed_run_metrics(session_factory, run_id) == 0

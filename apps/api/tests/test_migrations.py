@@ -64,3 +64,19 @@ def test_metrics_migration_creates_versioned_append_only_storage(
     assert "DROP TABLE metric_results" in downgrade_sql
     assert "DROP TABLE metric_definitions" in downgrade_sql
     assert "DROP TRIGGER IF EXISTS metric_results_append_only ON metric_results" in downgrade_sql
+
+
+def test_trace_migration_creates_safe_append_only_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    upgrade_sql = _offline_migration_sql("head")
+    downgrade_sql = _offline_migration_sql("head:0012_metrics", downgrade=True)
+
+    assert "CREATE TABLE traces" in upgrade_sql
+    assert "CREATE TABLE failure_cases" in upgrade_sql
+    assert "CREATE TRIGGER traces_append_only" in upgrade_sql
+    assert "CREATE TRIGGER failure_cases_append_only" in upgrade_sql
+    assert "REVOKE UPDATE, DELETE ON TABLE traces FROM PUBLIC" in upgrade_sql
+    assert "DROP TABLE failure_cases" in downgrade_sql
+    assert "DROP TABLE traces" in downgrade_sql

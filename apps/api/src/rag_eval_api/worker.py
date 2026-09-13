@@ -315,6 +315,7 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
         adapter_factory=build_adapter,
         worker_id=f"experiment-worker-{os.getpid()}",
         lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
+        blob_store=cast(BlobStore, blob_store),
     )
     combined_worker = CombinedWorker(worker, candidate_worker, experiment_worker)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)

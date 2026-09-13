@@ -41,6 +41,7 @@ from rag_eval_api.models.metrics import MetricDefinition, MetricResult, MetricSc
 from rag_eval_api.models.model_providers import ModelProviderConfig, ModelProviderTestStatus
 from rag_eval_api.models.organization import Organization
 from rag_eval_api.models.project import Project
+from rag_eval_api.models.traces import FailureCase, PersistedTrace
 
 __all__ = [
     "AuditEvent",
@@ -73,6 +74,8 @@ __all__ = [
     "MetricDefinition",
     "MetricResult",
     "MetricScope",
+    "PersistedTrace",
+    "FailureCase",
     "Experiment",
     "ExperimentRun",
     "ExperimentRunAttempt",

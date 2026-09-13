@@ -25,6 +25,8 @@ type ExperimentRunResponse = components["schemas"]["ExperimentRunResponse"];
 type ExperimentRunItemResponse = components["schemas"]["ExperimentRunItemResponse"];
 type MetricDefinitionResponse = components["schemas"]["MetricDefinitionResponse"];
 type MetricResultResponse = components["schemas"]["MetricResultResponse"];
+type TraceResponse = components["schemas"]["TraceResponse"];
+type FailureCaseResponse = components["schemas"]["FailureCaseResponse"];
 
 type ErrorEnvelope = {
   error?: {
@@ -91,6 +93,9 @@ export type ApiClient = {
   listRunMetrics(projectId: string, experimentId: string, runId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
   listSampleMetrics(projectId: string, experimentId: string, runId: string, itemId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
   recalculateRunMetrics(projectId: string, experimentId: string, runId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
+  listTraces(projectId: string, options?: { query?: { run_id?: string; run_item_id?: string; limit?: number }; signal?: AbortSignal }): Promise<TraceResponse[]>;
+  getTrace(projectId: string, traceId: string, options?: { signal?: AbortSignal }): Promise<TraceResponse>;
+  listFailures(projectId: string, options?: { query?: { run_id?: string; code?: string; limit?: number }; signal?: AbortSignal }): Promise<FailureCaseResponse[]>;
 };
 
 export function createApiClient({
@@ -329,6 +334,34 @@ export function createApiClient({
       return requestJson<MetricResultResponse[]>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/metrics/recalculate`,
         { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listTraces(projectId, options) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(options?.query ?? {})) {
+        if (value !== undefined) query.set(key, String(value));
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return requestJson<TraceResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/traces${suffix}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async getTrace(projectId, traceId, options) {
+      return requestJson<TraceResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/traces/${encodeURIComponent(traceId)}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listFailures(projectId, options) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(options?.query ?? {})) {
+        if (value !== undefined) query.set(key, String(value));
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return requestJson<FailureCaseResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/failures${suffix}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
       );
     },
   };

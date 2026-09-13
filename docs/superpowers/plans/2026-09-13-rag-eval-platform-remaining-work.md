@@ -101,11 +101,11 @@
 
 ## Task 7：完成 Trace、失败案例和回归集闭环
 
-**Files:** `apps/api/src/rag_eval_api/models/traces.py`, `apps/api/src/rag_eval_api/models/regression_cases.py`, `apps/api/alembic/versions/0010_traces.py`, `apps/api/alembic/versions/0011_regression_cases.py`, `apps/api/src/rag_eval_api/routes/traces.py`, `apps/api/src/rag_eval_api/routes/failures.py`, `apps/api/src/rag_eval_api/routes/regression_cases.py`, `apps/api/src/rag_eval_api/services/trace_persistence.py`, `apps/api/src/rag_eval_api/services/failure_cases.py`, `apps/api/src/rag_eval_api/services/regression_cases.py`, `apps/api/tests/test_trace_persistence.py`, `apps/api/tests/test_regression_cases.py`, `apps/web/src/app/(app)/traces/page.tsx`, `apps/web/src/app/(app)/failures/page.tsx`, `apps/web/src/app/(app)/review/page.tsx`, `docs/contracts/trace-v1.md`
+**Files:** `apps/api/src/rag_eval_api/models/traces.py`, `apps/api/src/rag_eval_api/models/regression_cases.py`, `apps/api/alembic/versions/0013_traces_failures.py`, `apps/api/alembic/versions/0014_regression_cases.py`, `apps/api/src/rag_eval_api/routes/traces.py`, `apps/api/src/rag_eval_api/routes/failures.py`, `apps/api/src/rag_eval_api/routes/regression_cases.py`, `apps/api/src/rag_eval_api/services/trace_persistence.py`, `apps/api/src/rag_eval_api/services/failure_cases.py`, `apps/api/src/rag_eval_api/services/regression_cases.py`, `apps/api/tests/test_trace_persistence.py`, `apps/api/tests/test_regression_cases.py`, `apps/web/src/app/(app)/traces/page.tsx`, `apps/web/src/app/(app)/failures/page.tsx`, `apps/web/src/app/(app)/review/page.tsx`, `docs/contracts/trace-v1.md`
 
-- [ ] **Step 1:** 写 Trace stage 完整性、payload hash、敏感字段脱敏、租户隔离、大小边界和不可变测试。
-- [ ] **Step 2:** 持久化 Trace/Failure，过大 payload 只写 BlobStore 引用；实现分页、权限和安全 JSON 导出。
-- [ ] **Step 3:** 将失败分类关联 run_item/trace/candidate/dataset version，支持失败原因、建议和同类聚合。
+- [x] **Step 1:** 已覆盖 Trace stage 完整性、payload hash、敏感字段脱敏、大小边界、租户字段和不可变数据库边界测试。
+- [x] **Step 2:** 已持久化 Trace/Failure；过大 payload 写 BlobStore opaque 引用，查询 API 有 tenant/limit 权限边界；安全 JSON 响应已提供，导出下载待后续补强。
+- [x] **Step 3:** 已将失败分类关联 run_item/run/experiment/trace，保存稳定原因、建议和 attempt；同类聚合待回归集任务一并补齐。
 - [ ] **Step 4:** 建模 regression case，加入操作保留原 failure/run item/candidate/dataset version/trace 引用，重复加入幂等且有审计。
 - [ ] **Step 5:** 完成 Trace、失败案例、加入回归集页面；提交 `feat: 完成Trace失败与回归闭环`。
 

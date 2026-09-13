@@ -11,3 +11,11 @@ document全文, authorization headers, API keys and raw upstream errors must be
 redacted or omitted. Queries are tenant-scoped and size-bounded. A trace is
 linked to one run item and its adapter/model snapshots, so changing a later
 configuration cannot change historical diagnostics.
+
+The API exposes tenant-scoped Trace and failure lists with bounded limits. Trace
+stages are redacted before persistence; inline payloads are limited to 64 KiB,
+and larger payloads are written to BlobStore as an opaque reference when the
+configured store accepts them. Trace and failure rows are append-only and
+database-protected against update/delete. Failure cases retain only a stable
+classification, retryability, safe message, attempt number, and optional Trace
+ID; upstream error text is never returned.

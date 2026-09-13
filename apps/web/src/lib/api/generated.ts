@@ -576,6 +576,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Failure Cases */
+        get: operations["list_failure_cases_api_projects__project_id__failures_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/ingestion-jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -711,6 +728,40 @@ export interface paths {
         put?: never;
         /** Test Model Provider */
         post: operations["test_model_provider_api_projects__project_id__model_providers__provider_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Traces */
+        get: operations["list_traces_api_projects__project_id__traces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/traces/{trace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trace */
+        get: operations["get_trace_api_projects__project_id__traces__trace_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1586,6 +1637,48 @@ export interface components {
             experiment: components["schemas"]["ExperimentResponse"];
             run: components["schemas"]["ExperimentRunResponse"];
         };
+        /** FailureCaseResponse */
+        FailureCaseResponse: {
+            /** Attempt Number */
+            attempt_number: number;
+            /** Code */
+            code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /**
+             * Experiment Id
+             * Format: uuid
+             */
+            experiment_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Retryable */
+            retryable: boolean;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Run Item Id
+             * Format: uuid
+             */
+            run_item_id: string;
+            /** Safe Message */
+            safe_message: string;
+            /** Trace Id */
+            trace_id: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1874,6 +1967,46 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** TraceResponse */
+        TraceResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Experiment Id
+             * Format: uuid
+             */
+            experiment_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Level */
+            level: string;
+            /** Payload Hash */
+            payload_hash: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Run Item Id
+             * Format: uuid
+             */
+            run_item_id: string;
+            /** Stages */
+            stages: {
+                [key: string]: unknown;
+            }[];
+            /** Trace Id */
+            trace_id: string;
+            /** Trace Version */
+            trace_version: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -3184,6 +3317,41 @@ export interface operations {
             };
         };
     };
+    list_failure_cases_api_projects__project_id__failures_get: {
+        parameters: {
+            query?: {
+                run_id?: string | null;
+                code?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailureCaseResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ingestion_job_api_projects__project_id__ingestion_jobs__job_id__get: {
         parameters: {
             query?: never;
@@ -3594,6 +3762,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProviderResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_traces_api_projects__project_id__traces_get: {
+        parameters: {
+            query?: {
+                run_id?: string | null;
+                run_item_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trace_api_projects__project_id__traces__trace_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceResponse"];
                 };
             };
             /** @description Validation Error */
