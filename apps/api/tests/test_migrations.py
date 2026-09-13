@@ -46,6 +46,19 @@ def test_foundation_offline_sql_covers_audit_and_updated_at_guards(
     assert "DROP FUNCTION IF EXISTS public.rag_eval_set_updated_at()" in downgrade_sql
 
 
+def test_candidate_generation_migration_preserves_existing_check_constraint_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    upgrade_sql = _offline_migration_sql("head")
+
+    assert (
+        "ALTER TABLE ingestion_jobs DROP CONSTRAINT ck_ingestion_jobs_job_resource_matches_kind;"
+        in upgrade_sql
+    )
+    assert "ck_ingestion_jobs_ck_ingestion_jobs_job_resource_matches_kind" not in upgrade_sql
+
+
 def test_metrics_migration_creates_versioned_append_only_storage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,6 +77,26 @@ def test_metrics_migration_creates_versioned_append_only_storage(
     assert "DROP TABLE metric_results" in downgrade_sql
     assert "DROP TABLE metric_definitions" in downgrade_sql
     assert "DROP TRIGGER IF EXISTS metric_results_append_only ON metric_results" in downgrade_sql
+
+
+def test_append_only_migrations_emit_one_postgres_command_per_execute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    upgrade_sql = _offline_migration_sql("head")
+
+    assert (
+        "EXECUTE FUNCTION public.rag_eval_prevent_metric_mutation();\n            REVOKE"
+        not in upgrade_sql
+    )
+    assert (
+        "EXECUTE FUNCTION public.rag_eval_prevent_trace_failure_mutation();\n            REVOKE"
+        not in upgrade_sql
+    )
+    assert (
+        "EXECUTE FUNCTION public.rag_eval_prevent_regression_case_mutation();\n        REVOKE"
+        not in upgrade_sql
+    )
 
 
 def test_trace_migration_creates_safe_append_only_diagnostics(

@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.15.1",
+  "pnpm": {
+    "overrides": {
+      "postcss": "8.5.28",
+      "sharp": "0.35.4"
+    }
+  },
   "scripts": {
     "generate:web-api": "bash scripts/generate-web-api-client.sh",
     "lint": "pnpm --recursive lint",

@@ -125,7 +125,7 @@
 - [ ] **Step 1:** 使用确定性 fixture 验证文档上传→解析→候选生成→审核发布→实验→指标→Trace→回归集；禁止外部 Provider 和真实用户数据。
 - [ ] **Step 2:** 统一 request/job/attempt/lease/fencing/trace/project/error 字段，API/Worker/Provider/Adapter 结构化日志脱敏。
 - [ ] **Step 3:** 修复 pinned Python 镜像 403 后运行 Compose、迁移、Worker ready、Playwright 和 API integration；失败上传日志但不上传 secrets。
-- [ ] **Step 4:** 补依赖许可证和安全审计，选择并提交明确 LICENSE，更新 README、CONTRIBUTING、CODE_OF_CONDUCT、SECURITY、CHANGELOG、Issue/PR 模板。
+- [x] **Step 4:** 已补 MIT LICENSE、依赖许可证清单、npm/pip 审计命令、README、CHANGELOG、Issue/PR 模板和发布检查清单；官方 npm 审计与 Python `pip-audit` 均通过。
 - [ ] **Step 5:** 运行 `make lint && make typecheck && make test && make build && make test-integration`，记录结果和已知限制；提交 `chore: 完成开源MVP发布验收`。
 
 ## 依赖顺序和完成定义
@@ -151,3 +151,5 @@
 - 本轮验证：API 非集成测试 `240 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
 - 本轮新增：`0013_traces_failures`、`0014_regression_cases` 迁移，Trace/Failure 脱敏持久化、Blob 引用、失败页和回归集幂等加入；Task 7 当前批次验证 API `244 passed, 2 skipped, 6 deselected`，Web 构建成功。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。
+- 本轮开源验收：补齐 MIT LICENSE、Issue/PR 模板、发布检查清单和 Web/API 依赖许可证记录；升级 Next `15.5.24`、PostCSS `8.5.28`、Sharp `0.35.4` 安全覆盖后，官方 npm audit 无已知漏洞，Python `pip-audit --skip-editable --strict --local` 无已知漏洞。
+- 本轮集成回归：修复 `0005` Alembic check constraint 命名约定，并拆分 `0012/0013/0014` 的 PostgreSQL 多语句 `op.execute`；空库迁移已成功到 `0014_regression_cases`，当前仅在 Worker 镜像构建阶段受 Docker Hub pinned Python digest `403 Forbidden` 阻塞。

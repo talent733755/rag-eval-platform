@@ -165,9 +165,9 @@ def upgrade() -> None:
             BEFORE UPDATE OR DELETE ON {table}
             FOR EACH ROW
             EXECUTE FUNCTION public.rag_eval_prevent_metric_mutation();
-            REVOKE UPDATE, DELETE ON TABLE {table} FROM PUBLIC;
             """
         )
+        op.execute(f"REVOKE UPDATE, DELETE ON TABLE {table} FROM PUBLIC")
 
 
 def downgrade() -> None:

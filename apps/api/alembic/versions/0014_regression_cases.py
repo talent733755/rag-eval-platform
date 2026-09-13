@@ -124,13 +124,17 @@ def upgrade() -> None:
                 USING ERRCODE = 'restrict_violation';
         END;
         $$;
+        """
+    )
+    op.execute(
+        """
         CREATE TRIGGER regression_cases_append_only
         BEFORE UPDATE OR DELETE ON regression_cases
         FOR EACH ROW
         EXECUTE FUNCTION public.rag_eval_prevent_regression_case_mutation();
-        REVOKE UPDATE, DELETE ON TABLE regression_cases FROM PUBLIC;
         """
     )
+    op.execute("REVOKE UPDATE, DELETE ON TABLE regression_cases FROM PUBLIC")
 
 
 def downgrade() -> None:

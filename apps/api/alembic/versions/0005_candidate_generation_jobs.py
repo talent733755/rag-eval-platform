@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.sql.elements import conv
 
 revision: str = "0005_candidate_generation_jobs"
 down_revision: str | None = "0004_candidate_dataset_versions"
@@ -18,7 +19,7 @@ def upgrade() -> None:
         ["id", "dataset_id", "organization_id", "project_id"],
     )
     op.drop_constraint(
-        "ck_ingestion_jobs_job_resource_matches_kind", "ingestion_jobs", type_="check"
+        conv("ck_ingestion_jobs_job_resource_matches_kind"), "ingestion_jobs", type_="check"
     )
     op.add_column(
         "ingestion_jobs", sa.Column("source_version_id", sa.Uuid(as_uuid=True), nullable=True)
@@ -64,7 +65,7 @@ def upgrade() -> None:
         ondelete="RESTRICT",
     )
     op.create_check_constraint(
-        "ck_ingestion_jobs_job_resource_matches_kind",
+        conv("ck_ingestion_jobs_job_resource_matches_kind"),
         "ingestion_jobs",
         "((job_kind = 'parse' AND document_version_id IS NOT NULL AND candidate_dataset_id IS NULL AND source_version_id IS NULL AND generation_config_id IS NULL AND candidate_dataset_version_id IS NULL) OR (job_kind = 'generate_candidates' AND document_version_id IS NULL AND candidate_dataset_id IS NOT NULL AND source_version_id IS NOT NULL AND generation_config_id IS NOT NULL AND candidate_dataset_version_id IS NOT NULL))",
     )
@@ -72,7 +73,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "ck_ingestion_jobs_job_resource_matches_kind", "ingestion_jobs", type_="check"
+        conv("ck_ingestion_jobs_job_resource_matches_kind"), "ingestion_jobs", type_="check"
     )
     op.drop_constraint(
         "fk_ingestion_jobs_candidate_dataset_version_tenant", "ingestion_jobs", type_="foreignkey"
@@ -90,7 +91,7 @@ def downgrade() -> None:
     op.drop_column("ingestion_jobs", "candidate_dataset_version_id")
     op.drop_column("ingestion_jobs", "source_version_id")
     op.create_check_constraint(
-        "ck_ingestion_jobs_job_resource_matches_kind",
+        conv("ck_ingestion_jobs_job_resource_matches_kind"),
         "ingestion_jobs",
         "((job_kind = 'parse' AND document_version_id IS NOT NULL AND candidate_dataset_id IS NULL) OR (job_kind = 'generate_candidates' AND document_version_id IS NULL AND candidate_dataset_id IS NOT NULL))",
     )

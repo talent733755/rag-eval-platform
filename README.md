@@ -415,3 +415,9 @@ Gold Dataset
 - 变更必须经过格式化、静态检查、类型检查（如适用）、测试、构建和安全检查等质量门禁。
 - 架构优先考虑模块化、可扩展、可替换和可复现，不能为了演示效果留下不可维护的临时实现。
 - 面向社区使用的文档、贡献流程、行为准则、安全漏洞报告、变更记录和发布版本会作为项目逐步完善的正式组成部分。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。第三方依赖的许可证和安全审计边界见
+[`docs/legal/dependency-licenses.md`](docs/legal/dependency-licenses.md) 与
+[`docs/operations/release.md`](docs/operations/release.md)。

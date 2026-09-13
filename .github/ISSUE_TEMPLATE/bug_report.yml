@@ -1,0 +1,54 @@
+name: 缺陷报告
+description: 报告可复现的功能、安全边界或文档问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请不要在 Issue 中粘贴真实密钥、用户文档、完整 Trace 或内部地址。
+        安全漏洞请遵循 SECURITY.md 的私下报告流程。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: 请填写发布版本或可复现问题的 commit SHA。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请提供最小、确定性的 fixture 和命令。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 请脱敏错误码、日志和响应内容。
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境
+      options:
+        - 本地 macOS
+        - 本地 Linux
+        - Docker Compose
+        - GitHub Actions
+        - 其他
+    validations:
+      required: true
