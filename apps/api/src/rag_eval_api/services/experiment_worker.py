@@ -113,6 +113,19 @@ class ExperimentWorker:
                     ).all()
                 )
                 for run in runs:
+                    processing_items = list(
+                        (
+                            await session.scalars(
+                                select(ExperimentRunItem).where(
+                                    ExperimentRunItem.run_id == run.id,
+                                    ExperimentRunItem.status == ExperimentRunItemStatus.processing,
+                                )
+                            )
+                        ).all()
+                    )
+                    for item in processing_items:
+                        item.status = ExperimentRunItemStatus.queued
+                        item.started_at = None
                     run.status = ExperimentRunStatus.queued
                     run.worker_id = None
                     run.lease_expires_at = None
@@ -190,10 +203,13 @@ class ExperimentWorker:
                     raise RuntimeError("experiment run references are incomplete")
                 token = run.fencing_token + 1
                 run.status = ExperimentRunStatus.running
+                if run.started_at is None:
+                    run.started_at = now
                 run.worker_id = self.worker_id
                 run.lease_expires_at = now + self.lease_ttl
                 run.heartbeat_at = now
                 run.fencing_token = token
+                experiment.started_at = experiment.started_at or now
                 item.status = ExperimentRunItemStatus.processing
                 item.attempt_count += 1
                 item.started_at = now

@@ -17,6 +17,12 @@ type CandidateGenerationJobResponse = components["schemas"]["CandidateGeneration
 type AdapterConfig = components["schemas"]["AdapterConfigResponse"];
 type AdapterConfigCreate = components["schemas"]["AdapterConfigCreate"];
 type AdapterConfigUpdate = components["schemas"]["AdapterConfigUpdate"];
+type ModelProviderConfig = components["schemas"]["ModelProviderResponse"];
+type ExperimentDraftRequest = components["schemas"]["ExperimentDraftRequest"];
+type ExperimentResponse = components["schemas"]["ExperimentResponse"];
+type ExperimentStartResponse = components["schemas"]["ExperimentStartResponse"];
+type ExperimentRunResponse = components["schemas"]["ExperimentRunResponse"];
+type ExperimentRunItemResponse = components["schemas"]["ExperimentRunItemResponse"];
 
 type ErrorEnvelope = {
   error?: {
@@ -70,6 +76,14 @@ export type ApiClient = {
   updateAdapter(projectId: string, adapterId: string, payload: AdapterConfigUpdate, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
   deleteAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<void>;
   testAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
+  listModelProviders(projectId: string, options?: { signal?: AbortSignal }): Promise<ModelProviderConfig[]>;
+  listExperiments(projectId: string, options?: { signal?: AbortSignal }): Promise<ExperimentResponse[]>;
+  createExperiment(projectId: string, payload: ExperimentDraftRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<ExperimentResponse>;
+  startExperiment(projectId: string, experimentId: string, options?: { signal?: AbortSignal }): Promise<ExperimentStartResponse>;
+  listExperimentRuns(projectId: string, experimentId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunResponse[]>;
+  cancelExperimentRun(projectId: string, runId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunResponse>;
+  listExperimentRunItems(projectId: string, runId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunItemResponse[]>;
+  retryExperimentRunItem(projectId: string, runId: string, itemId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunItemResponse>;
 };
 
 export function createApiClient({
@@ -229,6 +243,54 @@ export function createApiClient({
     async testAdapter(projectId, adapterId, options) {
       return requestJson<AdapterConfig>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/adapters/${encodeURIComponent(adapterId)}/test`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listModelProviders(projectId, options) {
+      return requestJson<ModelProviderConfig[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/model-providers`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listExperiments(projectId, options) {
+      return requestJson<ExperimentResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async createExperiment(projectId, payload, options) {
+      return requestJson<ExperimentResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments`,
+        { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json", "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() } }, fetchImpl,
+      );
+    },
+    async startExperiment(projectId, experimentId, options) {
+      return requestJson<ExperimentStartResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/start`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listExperimentRuns(projectId, experimentId, options) {
+      return requestJson<ExperimentRunResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async cancelExperimentRun(projectId, runId, options) {
+      return requestJson<ExperimentRunResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/runs/${encodeURIComponent(runId)}/cancel`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listExperimentRunItems(projectId, runId, options) {
+      return requestJson<ExperimentRunItemResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/runs/${encodeURIComponent(runId)}/items`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async retryExperimentRunItem(projectId, runId, itemId, options) {
+      return requestJson<ExperimentRunItemResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/retry`,
         { method: "POST", signal: options?.signal }, fetchImpl,
       );
     },

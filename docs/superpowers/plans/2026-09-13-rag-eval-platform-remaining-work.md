@@ -82,12 +82,12 @@
 
 ## Task 5：完成可恢复实验执行器
 
-**Files:** `apps/api/src/rag_eval_api/models/experiments.py`, `apps/api/alembic/versions/0008_experiments.py`, `apps/api/src/rag_eval_api/services/experiment_worker.py`, `apps/api/src/rag_eval_api/routes/experiments.py`, `apps/api/src/rag_eval_api/schemas/experiments.py`, `apps/api/tests/test_experiments.py`, `apps/web/src/app/(app)/experiments/page.tsx`, `apps/web/src/app/(app)/runs/page.tsx`
+**Files:** `apps/api/src/rag_eval_api/models/experiments.py`, `apps/api/alembic/versions/0009_experiments.py`, `apps/api/alembic/versions/0010_experiment_idempotency.py`, `apps/api/alembic/versions/0011_experiment_run_leases.py`, `apps/api/src/rag_eval_api/services/experiment_worker.py`, `apps/api/src/rag_eval_api/routes/experiments.py`, `apps/api/src/rag_eval_api/schemas/experiments.py`, `apps/api/tests/test_experiment_worker.py`, `apps/web/src/app/(app)/experiments/page.tsx`, `apps/web/src/components/experiments/experiments-workspace.tsx`
 
 - [ ] **Step 1:** 写并发、幂等、取消、逐样例重试、租约过期、新 fencing token、成本/耗时统计测试。
-- [ ] **Step 2:** 建模 experiment、run、run_item、attempt，保存所有配置 snapshot 和安全错误；外键必须带 tenant identity。
-- [ ] **Step 3:** 实现 run worker：按样例 bounded timeout 调 Adapter，记录 usage/latency/trace_id；单样例失败不污染其他样例，重试保留历史 attempt。
-- [ ] **Step 4:** 提供创建/启动/取消/重试/详情/列表 API 和进度页面；启动前展示样例数、成本估计和配置摘要。
+- [x] **Step 2:** 已建模 experiment、run、run_item、attempt，保存配置 snapshot 和安全错误；外键带 tenant identity，Run 增加 lease/heartbeat/fencing 字段。
+- [ ] **Step 3:** 已实现按样例 bounded timeout 调 Adapter、usage/latency/trace_id、单样例隔离、过期 lease 恢复和历史 attempt；有限重试、取消中断和成本统计仍需后续增强。
+- [x] **Step 4:** 已提供创建/启动/取消/失败项重试/详情/列表 API 和实验进度页面；启动前展示样例数和配置选择，成本估计在 Provider 费率契约完成前保持未提供。
 - [ ] **Step 5:** 验证并提交 `feat: 实现实验任务与可恢复运行记录`。
 
 ## Task 6：完成指标持久化与 Dashboard
@@ -146,4 +146,5 @@
 - 本轮新增：文档详情任务轮询、完成/失败/取消状态、重试和取消交互；Task 2 剩余评测集分页和完整状态 reducer 仍未完成。
 - 本轮新增：Adapter 项目作用域 CRUD、HTTP 合成连接测试和前端操作；实验启动前 Adapter 可用性校验仍待 Task 4。
 - 本轮新增：Python Adapter trusted entry point registry 和模型 Provider CRUD/能力测试；实验实体、启动校验和模型/Adapter 完整快照引用仍待 Task 4/5。
+- 本轮新增：实验/Run/RunItem/Attempt 模型、快照创建/启动校验、租约 Worker、取消/失败项重试 API 和实验页面；运行指标、Trace、成本、取消中断和完整 E2E 仍待后续任务。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。
