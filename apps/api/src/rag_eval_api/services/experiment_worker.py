@@ -155,6 +155,13 @@ class ExperimentWorker:
                     if run.status is ExperimentRunStatus.running:
                         run.status = ExperimentRunStatus.succeeded if run.failed_units == 0 else ExperimentRunStatus.failed
                         run.completed_at = now
+                    elif run.status is ExperimentRunStatus.cancelling:
+                        run.status = ExperimentRunStatus.cancelled
+                        run.completed_at = now
+                        experiment = await session.get(Experiment, run.experiment_id)
+                        if experiment is not None:
+                            experiment.status = ExperimentStatus.cancelled
+                            experiment.completed_at = now
                     return None
                 experiment = await session.scalar(
                     select(Experiment).where(
@@ -283,12 +290,19 @@ class ExperimentWorker:
                 )
                 if item is None:
                     return "lease_lost"
-                final_status = ExperimentRunItemStatus.succeeded if status == "succeeded" else ExperimentRunItemStatus.failed
+                cancelled = run.status is ExperimentRunStatus.cancelling
+                final_status = (
+                    ExperimentRunItemStatus.cancelled
+                    if cancelled
+                    else ExperimentRunItemStatus.succeeded
+                    if status == "succeeded"
+                    else ExperimentRunItemStatus.failed
+                )
                 item.status = final_status
                 item.completed_at = now
                 item.error_code = error_code
                 item.error_message = error_message
-                if response is not None:
+                if response is not None and not cancelled:
                     item.final_answer = response.answer
                     item.final_usage = response.usage.model_dump(mode="json")
                     item.final_latency_ms = response.usage.latency_ms
@@ -311,8 +325,10 @@ class ExperimentWorker:
                 run.completed_units += 1
                 if final_status is ExperimentRunItemStatus.succeeded:
                     run.succeeded_units += 1
-                else:
+                elif final_status is ExperimentRunItemStatus.failed:
                     run.failed_units += 1
+                else:
+                    run.skipped_units += 1
                 remaining = await session.scalar(
                     select(func.count(ExperimentRunItem.id)).where(
                         ExperimentRunItem.run_id == run.id,
@@ -320,11 +336,23 @@ class ExperimentWorker:
                     )
                 )
                 if remaining == 0:
-                    run.status = ExperimentRunStatus.succeeded if run.failed_units == 0 else ExperimentRunStatus.failed
+                    run.status = (
+                        ExperimentRunStatus.cancelled
+                        if cancelled
+                        else ExperimentRunStatus.succeeded
+                        if run.failed_units == 0
+                        else ExperimentRunStatus.failed
+                    )
                     run.completed_at = now
                     experiment = await session.get(Experiment, run.experiment_id)
                     if experiment is not None:
-                        experiment.status = ExperimentStatus.succeeded if run.failed_units == 0 else ExperimentStatus.failed
+                        experiment.status = (
+                            ExperimentStatus.cancelled
+                            if cancelled
+                            else ExperimentStatus.succeeded
+                            if run.failed_units == 0
+                            else ExperimentStatus.failed
+                        )
                         experiment.completed_units = run.completed_units
                         experiment.succeeded_units = run.succeeded_units
                         experiment.failed_units = run.failed_units

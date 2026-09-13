@@ -53,6 +53,26 @@ class ExperimentRunResponse(BaseModel):
     updated_at: datetime
 
 
+class ExperimentRunItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    run_id: UUID
+    candidate_item_id: UUID
+    status: str
+    attempt_count: int
+    final_answer: str | None
+    final_usage: dict[str, object] | None
+    final_latency_ms: int | None
+    final_trace_id: str | None
+    error_code: str | None
+    error_message: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ExperimentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

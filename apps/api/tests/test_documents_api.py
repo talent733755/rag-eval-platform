@@ -35,10 +35,18 @@ from rag_eval_api.models import (
     CandidateDatasetVersion,
     CandidateGenerationConfig,
     CandidateItemEvidence,
+    CandidateReviewStatus,
     Document,
     DocumentChunk,
     DocumentParseStatus,
+    DocumentSourceType,
     DocumentVersion,
+    Experiment,
+    ExperimentRun,
+    ExperimentRunItem,
+    ExperimentRunItemStatus,
+    ExperimentRunStatus,
+    ExperimentStatus,
     IngestionJob,
     IngestionJobStatus,
     Membership,
@@ -1320,3 +1328,169 @@ async def test_experiment_create_freezes_snapshot_and_start_requires_accepted_it
     )
     assert started.status_code == 409
     assert started.json()["error"]["code"] == "dataset_has_no_accepted_items"
+
+
+@pytest.mark.asyncio
+async def test_experiment_run_can_be_cancelled_and_failed_item_requeued(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    experiment_id, run_id, item_id = uuid4(), uuid4(), uuid4()
+    dataset_id, version_id, document_id, document_version_id, config_id = (uuid4() for _ in range(5))
+    adapter_id, provider_id, candidate_id = uuid4(), uuid4(), uuid4()
+    async with session_factory() as session:
+        dataset = CandidateDataset(
+            id=dataset_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="控制评测集",
+            status=CandidateDatasetStatus.published,
+        )
+        version = CandidateDatasetVersion(
+            id=version_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset_id,
+            version_number=1,
+            status=CandidateDatasetStatus.published,
+            item_count=1,
+            created_by=EDITOR_ID,
+        )
+        document = Document(
+            id=document_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            display_name="控制文档",
+            source_type=DocumentSourceType.markdown,
+        )
+        document_version = DocumentVersion(
+            id=document_version_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            document_id=document_id,
+            version_number=1,
+            sha256="c" * 64,
+            byte_size=1,
+            detected_mime="text/markdown",
+            storage_key="test/control.md",
+            parse_status=DocumentParseStatus.succeeded,
+        )
+        generation_config = CandidateGenerationConfig(
+            id=config_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset_id,
+            capability_version="candidate-generation-v1",
+            provider_name="fixture",
+            model_name="fixture-model",
+            prompt_version="prompt-v1",
+            requested_version_ids=[str(document_version_id)],
+            chunk_content_hashes=[],
+            environment={},
+            request_id="control-request",
+        )
+        candidate = CandidateDatasetItem(
+            id=candidate_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset_id,
+            dataset_version_id=version_id,
+            generation_config_id=config_id,
+            source_version_id=document_version_id,
+            question="控制问题",
+            question_type="factual",
+            reference_answer="控制答案",
+            confidence=1,
+            automatic_checks={},
+            review_status=CandidateReviewStatus.accepted,
+            provenance={},
+        )
+        adapter = AdapterConfig(
+            id=adapter_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="控制 Adapter",
+            kind=AdapterKind.http,
+            endpoint="https://adapter.example.test",
+            adapter_version="adapter-v1",
+            trace_level="minimal",
+            timeout_seconds=30,
+            retry_count=0,
+            enabled=True,
+            last_test_status=AdapterTestStatus.succeeded,
+        )
+        provider = ModelProviderConfig(
+            id=provider_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="控制模型",
+            endpoint="https://model.example.test",
+            credential_ref="CONTROL_MODEL_TOKEN",
+            model_name="model-a",
+            enabled=True,
+        )
+        experiment = Experiment(
+            id=experiment_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="控制面实验",
+            idempotency_key="control-plane",
+            status=ExperimentStatus.failed,
+            dataset_version_id=version_id,
+            adapter_config_id=adapter_id,
+            model_provider_id=provider_id,
+            metric_versions={},
+            parameters={},
+            random_seed=1,
+            configuration_snapshot={},
+            environment_hash="b" * 64,
+            total_units=1,
+            completed_units=1,
+            failed_units=1,
+            created_by=EDITOR_ID,
+        )
+        run = ExperimentRun(
+            id=run_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            experiment_id=experiment_id,
+            status=ExperimentRunStatus.failed,
+            total_units=1,
+            completed_units=1,
+            failed_units=1,
+            created_by=EDITOR_ID,
+        )
+        item = ExperimentRunItem(
+            id=item_id,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            run_id=run_id,
+            candidate_item_id=uuid4(),
+            status=ExperimentRunItemStatus.failed,
+            attempt_count=1,
+            error_code="adapter_timeout",
+            error_message="Adapter request timed out.",
+        )
+        item.candidate_item_id = candidate_id
+        session.add_all([dataset, version, document, document_version, generation_config, candidate, adapter, provider])
+        await session.flush()
+        session.add_all([experiment, run, item])
+        await session.commit()
+
+    retried = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/runs/{run_id}/items/{item_id}/retry"
+    )
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "queued"
+    cancelled = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/runs/{run_id}/cancel"
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 import sys
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -20,6 +21,7 @@ from rag_eval_api.models import (
     Experiment,
     ExperimentRun,
     ExperimentRunItem,
+    ExperimentRunItemStatus,
     ExperimentRunStatus,
     ExperimentStatus,
     ModelProviderConfig,
@@ -27,6 +29,8 @@ from rag_eval_api.models import (
 from rag_eval_api.schemas.experiments import (
     ExperimentDraftRequest,
     ExperimentResponse,
+    ExperimentRunItemResponse,
+    ExperimentRunResponse,
     ExperimentStartResponse,
 )
 from rag_eval_api.services.audit import record_audit_event
@@ -226,3 +230,182 @@ async def start_experiment(
     )
     await db_session.commit()
     return {"experiment": experiment, "run": run}
+
+
+@router.get("/{experiment_id}", response_model=ExperimentResponse)
+async def get_experiment(
+    experiment_id: UUID,
+    access: ProjectAccess = Depends(require_project_member),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> Experiment:
+    return await _get_experiment(experiment_id, access, db_session)
+
+
+async def _get_run(
+    run_id: UUID, access: ProjectAccess, db_session: AsyncSession
+) -> ExperimentRun:
+    run = await db_session.scalar(
+        select(ExperimentRun).where(
+            ExperimentRun.id == run_id,
+            ExperimentRun.organization_id == access.actor.organization_id,
+            ExperimentRun.project_id == access.project.id,
+        )
+    )
+    if run is None:
+        raise _error(404, "not_found", "Resource not found.")
+    return run
+
+
+@router.get("/{experiment_id}/runs", response_model=list[ExperimentRunResponse])
+async def list_experiment_runs(
+    experiment_id: UUID,
+    access: ProjectAccess = Depends(require_project_member),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> list[ExperimentRun]:
+    await _get_experiment(experiment_id, access, db_session)
+    return list(
+        (
+            await db_session.scalars(
+                select(ExperimentRun)
+                .where(
+                    ExperimentRun.experiment_id == experiment_id,
+                    ExperimentRun.organization_id == access.actor.organization_id,
+                    ExperimentRun.project_id == access.project.id,
+                )
+                .order_by(ExperimentRun.created_at.desc())
+            )
+        ).all()
+    )
+
+
+@router.get("/runs/{run_id}", response_model=ExperimentRunResponse)
+async def get_experiment_run(
+    run_id: UUID,
+    access: ProjectAccess = Depends(require_project_member),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ExperimentRun:
+    return await _get_run(run_id, access, db_session)
+
+
+@router.get("/runs/{run_id}/items", response_model=list[ExperimentRunItemResponse])
+async def list_experiment_run_items(
+    run_id: UUID,
+    access: ProjectAccess = Depends(require_project_member),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> list[ExperimentRunItem]:
+    await _get_run(run_id, access, db_session)
+    return list(
+        (
+            await db_session.scalars(
+                select(ExperimentRunItem)
+                .where(
+                    ExperimentRunItem.run_id == run_id,
+                    ExperimentRunItem.organization_id == access.actor.organization_id,
+                    ExperimentRunItem.project_id == access.project.id,
+                )
+                .order_by(ExperimentRunItem.created_at, ExperimentRunItem.id)
+            )
+        ).all()
+    )
+
+
+@router.post("/runs/{run_id}/cancel", response_model=ExperimentRunResponse)
+async def cancel_experiment_run(
+    run_id: UUID,
+    access: ProjectAccess = Depends(require_project_editor),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ExperimentRun:
+    run = await _get_run(run_id, access, db_session)
+    if run.status in {ExperimentRunStatus.succeeded, ExperimentRunStatus.failed, ExperimentRunStatus.cancelled}:
+        raise _error(409, "run_not_cancellable", "Run is already terminal.")
+    now = datetime.now(UTC)
+    if run.status is ExperimentRunStatus.queued:
+        queued_items = list(
+            (
+                await db_session.scalars(
+                    select(ExperimentRunItem)
+                    .where(
+                        ExperimentRunItem.run_id == run.id,
+                        ExperimentRunItem.status == ExperimentRunItemStatus.queued,
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        for item in queued_items:
+            item.status = ExperimentRunItemStatus.cancelled
+            item.completed_at = now
+            run.skipped_units += 1
+            run.completed_units += 1
+        run.status = ExperimentRunStatus.cancelled
+        run.completed_at = now
+    else:
+        run.status = ExperimentRunStatus.cancelling
+    experiment = await db_session.get(Experiment, run.experiment_id)
+    if experiment is not None:
+        experiment.status = ExperimentStatus.cancelled if run.status is ExperimentRunStatus.cancelled else ExperimentStatus.cancelling
+        if run.status is ExperimentRunStatus.cancelled:
+            experiment.completed_at = now
+    record_audit_event(
+        db_session,
+        organization_id=access.actor.organization_id,
+        project_id=access.project.id,
+        actor_id=access.actor.user_id,
+        action="experiment.run_cancel_requested",
+        resource_type="experiment_run",
+        resource_id=str(run.id),
+        metadata={"status": run.status.value},
+    )
+    await db_session.commit()
+    return run
+
+
+@router.post("/runs/{run_id}/items/{item_id}/retry", response_model=ExperimentRunItemResponse)
+async def retry_experiment_run_item(
+    run_id: UUID,
+    item_id: UUID,
+    access: ProjectAccess = Depends(require_project_editor),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ExperimentRunItem:
+    run = await _get_run(run_id, access, db_session)
+    item = await db_session.scalar(
+        select(ExperimentRunItem).where(
+            ExperimentRunItem.id == item_id,
+            ExperimentRunItem.run_id == run.id,
+            ExperimentRunItem.organization_id == access.actor.organization_id,
+            ExperimentRunItem.project_id == access.project.id,
+        )
+    )
+    if item is None:
+        raise _error(404, "not_found", "Resource not found.")
+    if item.status is not ExperimentRunItemStatus.failed:
+        raise _error(409, "item_not_retryable", "Only failed run items can be retried.")
+    item.status = ExperimentRunItemStatus.queued
+    item.error_code = None
+    item.error_message = None
+    item.completed_at = None
+    run.status = ExperimentRunStatus.queued
+    run.completed_at = None
+    run.completed_units = max(0, run.completed_units - 1)
+    run.failed_units = max(0, run.failed_units - 1)
+    run.worker_id = None
+    run.lease_expires_at = None
+    run.heartbeat_at = None
+    experiment = await db_session.get(Experiment, run.experiment_id)
+    if experiment is not None:
+        experiment.status = ExperimentStatus.queued
+        experiment.completed_at = None
+        experiment.completed_units = max(0, experiment.completed_units - 1)
+        experiment.failed_units = max(0, experiment.failed_units - 1)
+    record_audit_event(
+        db_session,
+        organization_id=access.actor.organization_id,
+        project_id=access.project.id,
+        actor_id=access.actor.user_id,
+        action="experiment.run_item_retried",
+        resource_type="experiment_run_item",
+        resource_id=str(item.id),
+        metadata={"run_id": str(run.id)},
+    )
+    await db_session.commit()
+    return item
