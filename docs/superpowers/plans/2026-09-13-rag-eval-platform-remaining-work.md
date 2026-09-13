@@ -51,9 +51,9 @@
 - Test: `apps/web/tests/documents-reducer.test.ts`, `apps/web/tests/documents-page.test.tsx`, `apps/web/tests/candidate-review.test.tsx`
 
 - [ ] **Step 1: 测试状态机。** 固定 project/query/type/status/cursor 保留规则、列表 loading/error/403/409/503、每文件独立批量结果、job 轮询仅更新对应行、取消停止轮询、归档/重试刷新当前 cursor。
-- [ ] **Step 2: 扩展 typed client。** 增加 get document/version、archive、retry、cancel、generate、dataset/version/items/review/publish 方法；统一把 401/403/409/413/429/503 映射为本地错误，不记录完整响应体和密钥。
+- [x] **Step 2: 扩展 typed client。** 已增加文档详情、任务、归档、重试、取消、候选生成及评测集/version/items/review/publish 方法；统一错误信封只保留状态、错误码和安全消息。
 - [ ] **Step 3: 实现文档详情和任务状态。** 展示版本号、sha256 摘要、解析状态、失败安全码、取消/重试/归档按钮；轮询使用 AbortController 和退避，组件卸载必须取消请求。
-- [ ] **Step 4: 实现候选审核。** 展示问题、参考答案、来源版本、chunk ordinal/excerpt、自动检查和 provenance；逐条接受/拒绝/评论，发布前显示 pending 数，发布后禁用修改。
+- [x] **Step 4: 实现候选审核。** `/review` 已展示问题、参考答案、来源版本和 chunk excerpt，支持逐条接受/拒绝，发布前阻止 pending，发布后禁用修改。
 - [ ] **Step 5: 验证并提交。** 运行 Web lint、typecheck、Vitest、build；提交 `feat: 完成文档与候选审核web闭环`。
 
 ## Task 3：完成 Adapter 公共实现和配置管理
@@ -139,4 +139,5 @@
 - 已完成 Task 1 Step 1–4：候选生成快照幂等、generation job 复合引用、独立 Candidate Worker、Provider 配置接入和租约 fencing。
 - 已验证：API 非集成测试 `222 passed, 2 skipped, 6 deselected`；候选/文档定向测试 `29 passed`；Web `lint`、`typecheck`、Vitest `58 passed`。
 - 当前进行中：Task 1 Step 5 和 Task 2，重点是数据集分页/统一错误契约、文档任务状态轮询和候选审核 Web 闭环。
+- 本轮新增：候选审核页面、审核 reducer、文档详情抽屉和文档/任务操作 typed client；任务轮询、重试交互、数据集分页仍未完成。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataCard } from "@/components/ui/data-card";
+import { DocumentDetailDrawer } from "@/components/documents/document-detail-drawer";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { createApiClient } from "@/lib/api/client";
@@ -33,6 +34,7 @@ export function DocumentsWorkspace() {
   const [uploadState, setUploadState] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const client = useMemo(() => createApiClient(), []);
 
@@ -123,13 +125,14 @@ export function DocumentsWorkspace() {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((row) => (
-                  <tr key={row.id}><th className="px-3 py-4 font-medium text-text" scope="row">{row.display_name}</th><td className="px-3 py-4 text-muted">{row.source_type.toUpperCase()}</td><td className="px-3 py-4 text-muted">v{row.latest_version?.version_number ?? "—"}</td><td className="px-3 py-4"><StatusBadge status={statusFor(row.latest_version?.parse_status)}>{statusLabel(row.latest_version?.parse_status)}</StatusBadge></td></tr>
+                  <tr key={row.id}><th className="px-3 py-4 font-medium text-text" scope="row"><button type="button" className="text-left hover:text-primary" onClick={() => setSelectedDocumentId(row.id)}>{row.display_name}</button></th><td className="px-3 py-4 text-muted">{row.source_type.toUpperCase()}</td><td className="px-3 py-4 text-muted">v{row.latest_version?.version_number ?? "—"}</td><td className="px-3 py-4"><StatusBadge status={statusFor(row.latest_version?.parse_status)}>{statusLabel(row.latest_version?.parse_status)}</StatusBadge></td></tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </section>
+      {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} onClose={() => setSelectedDocumentId(null)} onChanged={() => setRefreshNonce((current) => current + 1)} />}
     </div>
   );
 }

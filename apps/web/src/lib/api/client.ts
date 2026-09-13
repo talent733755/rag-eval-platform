@@ -5,6 +5,8 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 type ProjectListResponse =
   operations["list_projects_api_projects_get"]["responses"][200]["content"]["application/json"];
 type DocumentListResponse = components["schemas"]["DocumentListResponse"];
+type DocumentResponse = components["schemas"]["DocumentResponse"];
+type DocumentJobResponse = components["schemas"]["DocumentJobResponse"];
 type BatchUploadResponse = components["schemas"]["DocumentBatchUploadResponse"];
 type CandidateDatasetResponse = components["schemas"]["CandidateDatasetResponse"];
 type CandidateDatasetVersionResponse = components["schemas"]["CandidateDatasetVersionResponse"];
@@ -42,6 +44,11 @@ export type ApiClient = {
       signal?: AbortSignal;
     },
   ): Promise<DocumentListResponse>;
+  getDocument(projectId: string, documentId: string, options?: { signal?: AbortSignal }): Promise<DocumentResponse>;
+  getIngestionJob(projectId: string, jobId: string, options?: { signal?: AbortSignal }): Promise<DocumentJobResponse>;
+  retryParse(projectId: string, documentId: string, versionId: string, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<DocumentJobResponse>;
+  cancelIngestionJob(projectId: string, jobId: string, options?: { signal?: AbortSignal }): Promise<DocumentJobResponse>;
+  archiveDocument(projectId: string, documentId: string, confirmReferenced?: boolean, options?: { signal?: AbortSignal }): Promise<DocumentResponse>;
   uploadDocuments(
     projectId: string,
     files: File[],
@@ -97,6 +104,36 @@ export function createApiClient({
           headers: { "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() },
         },
         fetchImpl,
+      );
+    },
+    async getDocument(projectId, documentId, options) {
+      return requestJson<DocumentResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async getIngestionJob(projectId, jobId, options) {
+      return requestJson<DocumentJobResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/ingestion-jobs/${encodeURIComponent(jobId)}`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async retryParse(projectId, documentId, versionId, options) {
+      return requestJson<DocumentJobResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/retry-parse`,
+        { method: "POST", signal: options?.signal, headers: { "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() } }, fetchImpl,
+      );
+    },
+    async cancelIngestionJob(projectId, jobId, options) {
+      return requestJson<DocumentJobResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/ingestion-jobs/${encodeURIComponent(jobId)}/cancel`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async archiveDocument(projectId, documentId, confirmReferenced = false, options) {
+      return requestJson<DocumentResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}/archive`,
+        { method: "POST", body: JSON.stringify({ confirm_referenced: confirmReferenced }), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
       );
     },
     async listCandidateDatasets(projectId, options) {
