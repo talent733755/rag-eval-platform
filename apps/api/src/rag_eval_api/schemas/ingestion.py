@@ -69,6 +69,22 @@ class DocumentUploadResponse(BaseModel):
     ingestion_job: DocumentUploadJob
 
 
+class DocumentBatchUploadItem(BaseModel):
+    """Per-file outcome for a partially successful batch upload."""
+
+    client_id: str
+    status: str
+    response: DocumentUploadResponse | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class DocumentBatchUploadResponse(BaseModel):
+    """Independent outcomes for one bounded multipart batch."""
+
+    items: list[DocumentBatchUploadItem]
+
+
 class DocumentVersionResponse(DocumentUploadVersion):
     """Public immutable document-version details without storage internals."""
 

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     Header,
@@ -27,10 +28,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-from rag_eval_api.auth.rbac import ProjectAccess, require_project_editor, require_project_member
+from rag_eval_api.auth.rbac import (
+    ProjectAccess,
+    require_project_admin,
+    require_project_editor,
+    require_project_member,
+)
 from rag_eval_api.config import DEFAULT_MAX_UPLOAD_BYTES, Settings
 from rag_eval_api.db import get_db_session
 from rag_eval_api.models import (
+    CandidateDataset,
+    CandidateDatasetItem,
+    CandidateDatasetStatus,
     Document,
     DocumentParseStatus,
     DocumentSourceType,
@@ -41,6 +50,8 @@ from rag_eval_api.models import (
 )
 from rag_eval_api.models.base import utc_now
 from rag_eval_api.schemas.ingestion import (
+    DocumentBatchUploadItem,
+    DocumentBatchUploadResponse,
     DocumentJobResponse,
     DocumentListResponse,
     DocumentResponse,
@@ -87,6 +98,7 @@ _UPLOAD_FORMATS: dict[str, tuple[DocumentSourceType, str, frozenset[str]]] = {
 }
 _READ_CHUNK_SIZE = 1024 * 1024
 _MAX_PAGE_SIZE = 100
+_MAX_BATCH_FILES = 20
 _RETRYABLE_PARSE_ERRORS = frozenset(
     {"parse_failed", "parse_timeout", "parser_sandbox_unavailable", "blob_store_error"}
 )
@@ -764,6 +776,8 @@ async def upload_document_version(
         project_id=project_id,
         document_id=document_id,
     )
+    if document.archived_at is not None or document.deleted_at is not None:
+        raise _error(409, "document_archived", "Archived documents cannot receive new versions.")
     display_name, suffix, source_type, detected_mime, accepted_mimes = _safe_filename(file.filename)
     declared_mime = (file.content_type or "").split(";", 1)[0].strip().lower()
     if declared_mime and declared_mime not in accepted_mimes:
@@ -956,6 +970,116 @@ async def upload_document_version(
         if stored is not None:
             await _delete_blob_quietly(blob_store, stored.storage_key)
         raise
+
+
+@router.post(
+    "/batch-upload",
+    response_model=DocumentBatchUploadResponse,
+    status_code=status.HTTP_207_MULTI_STATUS,
+)
+async def upload_documents_batch(
+    project_id: UUID,
+    request: Request,
+    files: Annotated[list[UploadFile], File(...)],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")] = "",
+    access: ProjectAccess = Depends(require_project_editor),
+    db_session: AsyncSession = Depends(get_db_session),
+    blob_store: BlobStore = Depends(get_blob_store),
+) -> DocumentBatchUploadResponse:
+    """Upload a bounded batch while preserving an independent result per file."""
+
+    idempotency_key = idempotency_key.strip()
+    if not idempotency_key or len(idempotency_key) > 255:
+        raise _error(422, "validation_error", "Idempotency-Key must be 1 to 255 characters.")
+    if not files or len(files) > _MAX_BATCH_FILES:
+        raise _error(422, "validation_error", f"Batch must contain 1 to {_MAX_BATCH_FILES} files.")
+
+    items: list[DocumentBatchUploadItem] = []
+    for index, upload in enumerate(files):
+        client_id = str(index)
+        try:
+            response = await upload_document(
+                project_id=project_id,
+                request=request,
+                file=upload,
+                idempotency_key=f"{idempotency_key}:{client_id}",
+                access=access,
+                db_session=db_session,
+                blob_store=blob_store,
+            )
+        except HTTPException as exc:
+            detail: dict[str, object] = (
+                exc.detail.get("error", {}) if isinstance(exc.detail, dict) else {}
+            )
+            if not isinstance(detail, dict):
+                detail = {}
+            items.append(
+                DocumentBatchUploadItem(
+                    client_id=client_id,
+                    status="rejected",
+                    error_code=str(detail.get("code", "upload_failed")),
+                    error_message=str(detail.get("message", "File upload failed.")),
+                )
+            )
+        else:
+            items.append(
+                DocumentBatchUploadItem(client_id=client_id, status="accepted", response=response)
+            )
+    return DocumentBatchUploadResponse(items=items)
+
+
+@router.post("/{document_id}/archive", response_model=DocumentResponse)
+async def archive_document(
+    project_id: UUID,
+    document_id: UUID,
+    confirm_referenced: Annotated[bool, Body(embed=True)] = False,
+    access: ProjectAccess = Depends(require_project_admin),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> DocumentResponse:
+    """Soft-archive a document without deleting historical versions or blobs."""
+
+    document, latest_version = await _scoped_document(
+        db_session,
+        organization_id=access.actor.organization_id,
+        project_id=project_id,
+        document_id=document_id,
+    )
+    version_ids = select(DocumentVersion.id).where(
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.organization_id == access.actor.organization_id,
+        DocumentVersion.project_id == project_id,
+    )
+    referenced = await db_session.scalar(
+        select(CandidateDatasetItem.id)
+        .join(CandidateDataset, CandidateDataset.id == CandidateDatasetItem.dataset_id)
+        .where(
+            CandidateDataset.organization_id == access.actor.organization_id,
+            CandidateDataset.project_id == project_id,
+            CandidateDataset.status == CandidateDatasetStatus.published,
+            CandidateDatasetItem.source_version_id.in_(version_ids),
+        )
+        .limit(1)
+    )
+    if referenced is not None and not confirm_referenced:
+        raise _error(
+            409,
+            "document_referenced_by_published_dataset",
+            "Document is referenced by a published dataset; confirmation is required.",
+        )
+    if document.archived_at is None:
+        document.archived_at = utc_now()
+        record_audit_event(
+            db_session,
+            organization_id=access.actor.organization_id,
+            project_id=project_id,
+            actor_id=access.actor.user_id,
+            action="document.archived",
+            resource_type="document",
+            resource_id=str(document_id),
+            metadata={"referenced_by_published_dataset": referenced is not None},
+        )
+        await db_session.commit()
+    return _document_response(document, latest_version)
 
 
 @router.post("", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED)
