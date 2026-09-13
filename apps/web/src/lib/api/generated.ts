@@ -734,6 +734,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/regression-cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Regression Cases */
+        get: operations["list_regression_cases_api_projects__project_id__regression_cases_get"];
+        put?: never;
+        /** Add Regression Case */
+        post: operations["add_regression_case_api_projects__project_id__regression_cases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/traces": {
         parameters: {
             query?: never;
@@ -1967,6 +1985,68 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** RegressionCaseCreate */
+        RegressionCaseCreate: {
+            /**
+             * Failure Case Id
+             * Format: uuid
+             */
+            failure_case_id: string;
+            /** Notes */
+            notes?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** RegressionCaseResponse */
+        RegressionCaseResponse: {
+            /**
+             * Candidate Item Id
+             * Format: uuid
+             */
+            candidate_item_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /**
+             * Dataset Version Id
+             * Format: uuid
+             */
+            dataset_version_id: string;
+            /**
+             * Failure Case Id
+             * Format: uuid
+             */
+            failure_case_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Notes */
+            notes: string | null;
+            /**
+             * Run Item Id
+             * Format: uuid
+             */
+            run_item_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Trace Record Id */
+            trace_record_id: string | null;
         };
         /** TraceResponse */
         TraceResponse: {
@@ -3762,6 +3842,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProviderResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_regression_cases_api_projects__project_id__regression_cases_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegressionCaseResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_regression_case_api_projects__project_id__regression_cases_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegressionCaseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegressionCaseResponse"];
                 };
             };
             /** @description Validation Error */

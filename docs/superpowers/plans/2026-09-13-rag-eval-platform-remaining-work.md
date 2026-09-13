@@ -106,8 +106,8 @@
 - [x] **Step 1:** 已覆盖 Trace stage 完整性、payload hash、敏感字段脱敏、大小边界、租户字段和不可变数据库边界测试。
 - [x] **Step 2:** 已持久化 Trace/Failure；过大 payload 写 BlobStore opaque 引用，查询 API 有 tenant/limit 权限边界；安全 JSON 响应已提供，导出下载待后续补强。
 - [x] **Step 3:** 已将失败分类关联 run_item/run/experiment/trace，保存稳定原因、建议和 attempt；同类聚合待回归集任务一并补齐。
-- [ ] **Step 4:** 建模 regression case，加入操作保留原 failure/run item/candidate/dataset version/trace 引用，重复加入幂等且有审计。
-- [ ] **Step 5:** 完成 Trace、失败案例、加入回归集页面；提交 `feat: 完成Trace失败与回归闭环`。
+- [x] **Step 4:** 已建模 regression case，加入操作保留原 failure/run item/candidate/dataset version/trace 引用，重复加入幂等且有审计。
+- [x] **Step 5:** 已完成 Trace、失败案例和失败页加入回归集操作；提交 `feat: 完成Trace失败与回归闭环`。
 
 ## Task 8：完成认证、设置、Dashboard 和安全治理
 
@@ -149,4 +149,5 @@
 - 本轮新增：实验/Run/RunItem/Attempt 模型、快照创建/启动校验、租约 Worker、取消/失败项重试 API 和实验页面；运行指标、Trace、成本、取消中断和完整 E2E 仍待后续任务。
 - 本轮新增：`0012_metrics` 迁移、不可变 metric definition/result、Run 终态指标计算、幂等重算和三级下钻 API；metrics/dashboard 已接入真实结果，检索指标等待 Trace 证据持久化。
 - 本轮验证：API 非集成测试 `240 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
+- 本轮新增：`0013_traces_failures`、`0014_regression_cases` 迁移，Trace/Failure 脱敏持久化、Blob 引用、失败页和回归集幂等加入；Task 7 当前批次验证 API `244 passed, 2 skipped, 6 deselected`，Web 构建成功。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

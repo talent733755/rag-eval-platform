@@ -80,3 +80,19 @@ def test_trace_migration_creates_safe_append_only_diagnostics(
     assert "REVOKE UPDATE, DELETE ON TABLE traces FROM PUBLIC" in upgrade_sql
     assert "DROP TABLE failure_cases" in downgrade_sql
     assert "DROP TABLE traces" in downgrade_sql
+
+
+def test_regression_case_migration_preserves_lineage_and_idempotency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    upgrade_sql = _offline_migration_sql("head")
+    downgrade_sql = _offline_migration_sql("head:0013_traces_failures", downgrade=True)
+
+    assert "CREATE TABLE regression_cases" in upgrade_sql
+    assert "fk_regression_cases_failure_tenant" in upgrade_sql
+    assert "fk_regression_cases_candidate_tenant" in upgrade_sql
+    assert "fk_regression_cases_dataset_version_tenant" in upgrade_sql
+    assert "uq_regression_cases_idempotency" in upgrade_sql
+    assert "CREATE TRIGGER regression_cases_append_only" in upgrade_sql
+    assert "DROP TABLE regression_cases" in downgrade_sql

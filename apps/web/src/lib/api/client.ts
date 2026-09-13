@@ -27,6 +27,8 @@ type MetricDefinitionResponse = components["schemas"]["MetricDefinitionResponse"
 type MetricResultResponse = components["schemas"]["MetricResultResponse"];
 type TraceResponse = components["schemas"]["TraceResponse"];
 type FailureCaseResponse = components["schemas"]["FailureCaseResponse"];
+type RegressionCaseResponse = components["schemas"]["RegressionCaseResponse"];
+type RegressionCaseCreate = components["schemas"]["RegressionCaseCreate"];
 
 type ErrorEnvelope = {
   error?: {
@@ -96,6 +98,8 @@ export type ApiClient = {
   listTraces(projectId: string, options?: { query?: { run_id?: string; run_item_id?: string; limit?: number }; signal?: AbortSignal }): Promise<TraceResponse[]>;
   getTrace(projectId: string, traceId: string, options?: { signal?: AbortSignal }): Promise<TraceResponse>;
   listFailures(projectId: string, options?: { query?: { run_id?: string; code?: string; limit?: number }; signal?: AbortSignal }): Promise<FailureCaseResponse[]>;
+  listRegressionCases(projectId: string, options?: { signal?: AbortSignal }): Promise<RegressionCaseResponse[]>;
+  addRegressionCase(projectId: string, payload: RegressionCaseCreate, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<RegressionCaseResponse>;
 };
 
 export function createApiClient({
@@ -362,6 +366,18 @@ export function createApiClient({
       return requestJson<FailureCaseResponse[]>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/failures${suffix}`,
         { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listRegressionCases(projectId, options) {
+      return requestJson<RegressionCaseResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/regression-cases`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async addRegressionCase(projectId, payload, options) {
+      return requestJson<RegressionCaseResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/regression-cases`,
+        { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json", "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() } }, fetchImpl,
       );
     },
   };
