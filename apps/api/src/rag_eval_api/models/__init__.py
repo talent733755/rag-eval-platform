@@ -28,6 +28,7 @@ from rag_eval_api.models.ingestion import (
     IngestionJobStatus,
 )
 from rag_eval_api.models.membership import Membership, MembershipRole
+from rag_eval_api.models.model_providers import ModelProviderConfig, ModelProviderTestStatus
 from rag_eval_api.models.organization import Organization
 from rag_eval_api.models.project import Project
 
@@ -57,6 +58,8 @@ __all__ = [
     "IngestionJobStatus",
     "Membership",
     "MembershipRole",
+    "ModelProviderConfig",
+    "ModelProviderTestStatus",
     "Organization",
     "Project",
     "TimestampMixin",

@@ -40,6 +40,7 @@ from rag_eval_api.models import (
     IngestionJobStatus,
     Membership,
     MembershipRole,
+    ModelProviderConfig,
     Organization,
     Project,
 )
@@ -965,3 +966,38 @@ async def test_editor_can_create_secret_free_adapter_configuration(
         stored = await session.scalar(select(AdapterConfig))
         assert stored is not None
         assert stored.token_last4 is None
+
+
+@pytest.mark.asyncio
+async def test_editor_can_create_secret_free_model_provider_configuration(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    response = await client.post(
+        f"/api/projects/{seed.project_id}/model-providers",
+        json={
+            "name": "模型服务",
+            "endpoint": "https://model.example.test",
+            "credential_ref": "MODEL_API_TOKEN",
+            "model_name": "model-a",
+            "timeout_seconds": 15,
+            "enabled": False,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["credential_ref"] == "MODEL_API_TOKEN"
+    listed = await client.get(f"/api/projects/{seed.project_id}/model-providers")
+    assert listed.status_code == 200
+    assert listed.json()[0]["model_name"] == "model-a"
+    async with session_factory() as session:
+        assert (
+            await session.scalar(select(ModelProviderConfig))
+        ).credential_ref == "MODEL_API_TOKEN"

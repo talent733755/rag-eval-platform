@@ -141,4 +141,5 @@
 - 当前进行中：Task 1 Step 5 和 Task 2，重点是数据集分页/统一错误契约、文档任务状态轮询和候选审核 Web 闭环。
 - 本轮新增：候选审核页面、审核 reducer、文档详情抽屉和文档/任务操作 typed client；任务轮询、重试交互、数据集分页仍未完成。
 - 本轮新增：Python SDK Adapter 子进程隔离、Adapter 配置迁移/API/页面；连接测试和完整 CRUD 仍未完成。
+- 本轮新增：模型 Provider 配置迁移/API 与不可变实验快照服务；实验实体、启动校验和可恢复执行器仍未完成。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。
