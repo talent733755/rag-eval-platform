@@ -113,12 +113,12 @@ def test_settings_accept_comma_separated_cors_origins() -> None:
 
     settings = Settings.model_validate(
         {
-            "CORS_ORIGINS": "http://localhost:3000, https://example.com",
+            "CORS_ORIGINS": "http://localhost:3003, https://example.com",
             "_env_file": None,
         }
     )
 
-    assert settings.cors_origins == ["http://localhost:3000", "https://example.com"]
+    assert settings.cors_origins == ["http://localhost:3003", "https://example.com"]
 
 
 def test_settings_reject_invalid_log_level() -> None:

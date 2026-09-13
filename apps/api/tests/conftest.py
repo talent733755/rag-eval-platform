@@ -62,7 +62,7 @@ def app() -> Iterator[FastAPI]:
         database_url=DEFAULT_DATABASE_URL,
         redis_url=DEFAULT_REDIS_URL,
         app_env="development",
-        cors_origins=["http://localhost:3000"],
+        cors_origins=["http://localhost:3003"],
         log_level="INFO",
         secret_key=SecretStr(DEFAULT_SECRET_KEY),
         _env_file=None,  # type: ignore[call-arg]

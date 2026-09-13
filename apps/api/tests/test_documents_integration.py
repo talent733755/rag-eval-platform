@@ -57,7 +57,7 @@ async def document_api_postgres_environment(
         database_url=database_url,
         redis_url=DEFAULT_REDIS_URL,
         app_env="development",
-        cors_origins=["http://localhost:3000"],
+        cors_origins=["http://localhost:3003"],
         log_level="INFO",
         secret_key=SecretStr(DEFAULT_SECRET_KEY),
         max_upload_bytes=1024,

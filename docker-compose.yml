@@ -37,7 +37,7 @@ services:
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8003:8000"
     environment:
       APP_ENV: ${APP_ENV:?APP_ENV must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL must be set in .env}
@@ -89,9 +89,10 @@ services:
       dockerfile: docker/web.Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3003:3000"
     environment:
       NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?NEXT_PUBLIC_API_BASE_URL must be set in .env}
     depends_on:
       api:
         condition: service_started

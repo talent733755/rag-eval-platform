@@ -5,9 +5,9 @@
 ```bash
 make infra-up
 uv run --directory apps/api alembic upgrade head
-uv run --directory apps/api uvicorn rag_eval_api.main:app --host 127.0.0.1 --port 8000
+uv run --directory apps/api uvicorn rag_eval_api.main:app --host 127.0.0.1 --port 8003
 uv run --directory apps/api python -m rag_eval_api.worker
-corepack pnpm --dir apps/web dev
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8003 corepack pnpm --dir apps/web dev -- --port 3003
 ```
 
 检查 `/health/live` 判断进程存活，检查 `/health/ready` 判断 PostgreSQL、Redis 和 Worker

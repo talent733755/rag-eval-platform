@@ -41,7 +41,7 @@ type SharedRequest = {
   abortTimer?: ReturnType<typeof setTimeout>;
 };
 
-const DEFAULT_API_BASE_URL = "http://localhost:8000";
+const DEFAULT_API_BASE_URL = "http://localhost:8003";
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 100;

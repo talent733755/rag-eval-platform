@@ -80,7 +80,7 @@ class Settings(BaseSettings):
         list[str],
         NoDecode,
         Field(validation_alias=AliasChoices("CORS_ORIGINS", "cors_origins")),
-    ] = ["http://localhost:3000"]
+    ] = ["http://localhost:3003"]
     log_level: Annotated[
         str,
         Field(validation_alias=AliasChoices("LOG_LEVEL", "log_level")),

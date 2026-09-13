@@ -161,7 +161,7 @@ describe("project switcher", () => {
     expect(await screen.findByRole("combobox", { name: "当前项目" })).toHaveValue(projects[0].id);
     expect(screen.getByRole("option", { name: "Alpha 项目" })).toBeVisible();
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/projects",
+      "http://localhost:8003/api/projects",
       expect.objectContaining({
         headers: { Accept: "application/json" },
         signal: expect.any(AbortSignal),

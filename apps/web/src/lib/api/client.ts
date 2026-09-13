@@ -1,6 +1,6 @@
 import type { components, operations } from "./generated";
 
-const DEFAULT_API_BASE_URL = "http://localhost:8000";
+const DEFAULT_API_BASE_URL = "http://localhost:8003";
 
 type ProjectListResponse =
   operations["list_projects_api_projects_get"]["responses"][200]["content"]["application/json"];

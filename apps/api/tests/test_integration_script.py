@@ -29,3 +29,25 @@ def test_integration_services_use_dynamic_host_ports() -> None:
     assert run_script.index('"${compose[@]}" stop worker') < run_script.index(
         "drop-test-database.sh"
     )
+
+
+def test_development_access_ports_are_consistent() -> None:
+    root = Path(__file__).parents[3]
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    env_example = (root / ".env.example").read_text(encoding="utf-8")
+    api_client = (root / "apps" / "web" / "src" / "lib" / "api" / "client.ts").read_text(
+        encoding="utf-8"
+    )
+    project_switcher = (
+        root / "apps" / "web" / "src" / "components" / "layout" / "project-switcher.tsx"
+    ).read_text(encoding="utf-8")
+    playwright = (root / "apps" / "web" / "playwright.config.ts").read_text(encoding="utf-8")
+
+    assert '"127.0.0.1:8003:8000"' in compose
+    assert '"127.0.0.1:3003:3000"' in compose
+    assert "CORS_ORIGINS=http://localhost:3003" in env_example
+    assert "NEXT_PUBLIC_API_BASE_URL=http://localhost:8003" in env_example
+    assert '"http://localhost:8003"' in api_client
+    assert '"http://localhost:8003"' in project_switcher
+    assert "http://127.0.0.1:3003" in playwright
+    assert "--port 3003" in playwright
