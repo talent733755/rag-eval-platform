@@ -6,6 +6,10 @@ type ProjectListResponse =
   operations["list_projects_api_projects_get"]["responses"][200]["content"]["application/json"];
 type DocumentListResponse = components["schemas"]["DocumentListResponse"];
 type BatchUploadResponse = components["schemas"]["DocumentBatchUploadResponse"];
+type CandidateDatasetResponse = components["schemas"]["CandidateDatasetResponse"];
+type CandidateDatasetVersionResponse = components["schemas"]["CandidateDatasetVersionResponse"];
+type CandidateItemResponse = components["schemas"]["CandidateItemResponse"];
+type CandidateReviewRequest = components["schemas"]["CandidateReviewRequest"];
 
 type ErrorEnvelope = {
   error?: {
@@ -41,6 +45,12 @@ export type ApiClient = {
     files: File[],
     options?: { signal?: AbortSignal; idempotencyKey?: string },
   ): Promise<BatchUploadResponse>;
+  listCandidateDatasets(projectId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetResponse[]>;
+  listCandidateDatasetVersions(projectId: string, datasetId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse[]>;
+  listCandidateItems(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse[]>;
+  reviewCandidateItem(projectId: string, datasetId: string, versionId: string, payload: CandidateReviewRequest, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse>;
+  publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
+  archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
 };
 
 export function createApiClient({
@@ -86,7 +96,43 @@ export function createApiClient({
         fetchImpl,
       );
     },
-};
+    async listCandidateDatasets(projectId, options) {
+      return requestJson<CandidateDatasetResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listCandidateDatasetVersions(projectId, datasetId, options) {
+      return requestJson<CandidateDatasetVersionResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listCandidateItems(projectId, datasetId, versionId, options) {
+      return requestJson<CandidateItemResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/items`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async reviewCandidateItem(projectId, datasetId, versionId, payload, options) {
+      return requestJson<CandidateItemResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/review`,
+        { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
+      );
+    },
+    async publishCandidateDatasetVersion(projectId, datasetId, versionId, options) {
+      return requestJson<CandidateDatasetVersionResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/publish`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async archiveCandidateDatasetVersion(projectId, datasetId, versionId, options) {
+      return requestJson<CandidateDatasetVersionResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/archive`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+  };
 }
 
 function createIdempotencyKey(): string {

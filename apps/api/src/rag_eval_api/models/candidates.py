@@ -36,6 +36,69 @@ class CandidateDatasetStatus(str, Enum):
     archived = "archived"
 
 
+class CandidateDatasetVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Immutable reviewable snapshot of a candidate dataset."""
+
+    __tablename__ = "candidate_dataset_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["dataset_id", "organization_id", "project_id"],
+            [
+                "candidate_datasets.id",
+                "candidate_datasets.organization_id",
+                "candidate_datasets.project_id",
+            ],
+            name="fk_candidate_dataset_versions_dataset_tenant",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "dataset_id", "version_number", name="uq_candidate_dataset_versions_number"
+        ),
+        UniqueConstraint(
+            "id", "organization_id", "project_id", name="uq_candidate_dataset_versions_tenant"
+        ),
+        CheckConstraint("version_number > 0", name="version_number_positive"),
+        CheckConstraint(
+            "status IN ('draft', 'review', 'published', 'archived')", name="valid_status"
+        ),
+        Index(
+            "ix_candidate_dataset_versions_project_status",
+            "organization_id",
+            "project_id",
+            "status",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    dataset_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[CandidateDatasetStatus] = mapped_column(
+        SqlEnum(
+            CandidateDatasetStatus,
+            name="candidate_dataset_version_status",
+            native_enum=False,
+            create_constraint=True,
+            length=9,
+        ),
+        nullable=False,
+        default=CandidateDatasetStatus.draft,
+    )
+    item_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    source_snapshot_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_by: Mapped[UUID] = mapped_column(nullable=False)
+
+    dataset: Mapped[CandidateDataset] = relationship(
+        back_populates="versions", overlaps="organization,project,items"
+    )
+    items: Mapped[list[CandidateDatasetItem]] = relationship(
+        back_populates="dataset_version", overlaps="organization,project,dataset"
+    )
+
+
 class CandidateReviewStatus(str, Enum):
     pending = "pending"
     accepted = "accepted"
@@ -94,7 +157,13 @@ class CandidateDataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="dataset",
         cascade="save-update, merge",
         passive_deletes=True,
-        overlaps="organization,project,generation_configs,evidence",
+        overlaps="organization,project,generation_configs,evidence,items,dataset_version",
+    )
+    versions: Mapped[list[CandidateDatasetVersion]] = relationship(
+        back_populates="dataset",
+        cascade="save-update, merge",
+        passive_deletes=True,
+        overlaps="organization,project,items",
     )
 
 
@@ -207,6 +276,16 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["dataset_version_id", "organization_id", "project_id"],
+            [
+                "candidate_dataset_versions.id",
+                "candidate_dataset_versions.organization_id",
+                "candidate_dataset_versions.project_id",
+            ],
+            name="fk_candidate_dataset_items_dataset_version_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["source_version_id", "organization_id", "project_id"],
             [
                 "document_versions.id",
@@ -252,6 +331,7 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     project_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     dataset_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    dataset_version_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
     generation_config_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     source_version_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
@@ -279,6 +359,9 @@ class CandidateDatasetItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     dataset: Mapped[CandidateDataset] = relationship(
         back_populates="items", overlaps="organization,project,evidence"
+    )
+    dataset_version: Mapped[CandidateDatasetVersion | None] = relationship(
+        back_populates="items", overlaps="organization,project,dataset,items"
     )
     generation_config: Mapped[CandidateGenerationConfig] = relationship(
         viewonly=True, overlaps="organization,project,dataset,evidence,items"

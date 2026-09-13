@@ -65,7 +65,7 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="organization", overlaps="project,dataset,generation_configs"
     )
     candidate_dataset_items: Mapped[list[CandidateDatasetItem]] = relationship(
-        back_populates="organization", overlaps="project,dataset,evidence,items"
+        back_populates="organization", overlaps="project,dataset,evidence,items,dataset_version"
     )
     candidate_item_evidence: Mapped[list[CandidateItemEvidence]] = relationship(
         back_populates="organization", overlaps="project,item,chunk,evidence"

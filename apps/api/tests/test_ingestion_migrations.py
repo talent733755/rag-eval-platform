@@ -23,6 +23,7 @@ def test_ingestion_migration_offline_sql_creates_all_tables_and_avoids_latest_ve
         "document_versions",
         "document_chunks",
         "candidate_datasets",
+        "candidate_dataset_versions",
         "candidate_generation_configs",
         "candidate_dataset_items",
         "candidate_item_evidence",
@@ -45,3 +46,4 @@ def test_ingestion_migration_offline_sql_creates_all_tables_and_avoids_latest_ve
     assert "CREATE TRIGGER ingestion_job_attempts_append_only" in sql
     assert "CREATE TRIGGER candidate_item_evidence_append_only" in sql
     assert "ON DELETE RESTRICT" in sql
+    assert "dataset_version_id" in sql

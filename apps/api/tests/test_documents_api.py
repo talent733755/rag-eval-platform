@@ -23,6 +23,9 @@ from rag_eval_api.main import create_app
 from rag_eval_api.models import (
     AuditEvent,
     Base,
+    CandidateDataset,
+    CandidateDatasetStatus,
+    CandidateDatasetVersion,
     Document,
     DocumentParseStatus,
     DocumentVersion,
@@ -654,3 +657,52 @@ async def test_job_query_and_cancel_are_project_scoped(
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "cancelled"
     assert cross_project.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_candidate_dataset_version_can_be_listed_and_published_when_empty(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    async with session_factory() as session:
+        dataset = CandidateDataset(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="回归评测集",
+            status=CandidateDatasetStatus.draft,
+        )
+        session.add(dataset)
+        await session.flush()
+        version = CandidateDatasetVersion(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset.id,
+            version_number=1,
+            status=CandidateDatasetStatus.draft,
+            created_by=EDITOR_ID,
+        )
+        session.add(version)
+        await session.commit()
+        dataset_id, version_id = dataset.id, version.id
+
+    listed = await client.get(f"/api/projects/{seed.project_id}/candidate-datasets")
+    versions = await client.get(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}/versions"
+    )
+    published = await client.post(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}/versions/{version_id}/publish"
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()[0]["name"] == "回归评测集"
+    assert versions.status_code == 200
+    assert versions.json()[0]["version_number"] == 1
+    assert published.status_code == 200
+    assert published.json()["status"] == "published"
