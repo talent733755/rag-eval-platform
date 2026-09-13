@@ -25,7 +25,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from rag_eval_api.models.base import Base, UTCDateTime, UUIDPrimaryKeyMixin, utc_now
 
 if TYPE_CHECKING:
-    from rag_eval_api.models.candidates import CandidateDataset
+    from rag_eval_api.models.candidates import (
+        CandidateDataset,
+        CandidateDatasetVersion,
+        CandidateGenerationConfig,
+    )
     from rag_eval_api.models.documents import DocumentVersion
     from rag_eval_api.models.organization import Organization
     from rag_eval_api.models.project import Project
@@ -87,6 +91,43 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
             name="fk_ingestion_jobs_candidate_dataset_tenant",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["source_version_id", "organization_id", "project_id"],
+            [
+                "document_versions.id",
+                "document_versions.organization_id",
+                "document_versions.project_id",
+            ],
+            name="fk_ingestion_jobs_source_version_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["generation_config_id", "candidate_dataset_id", "organization_id", "project_id"],
+            [
+                "candidate_generation_configs.id",
+                "candidate_generation_configs.dataset_id",
+                "candidate_generation_configs.organization_id",
+                "candidate_generation_configs.project_id",
+            ],
+            name="fk_ingestion_jobs_generation_config_dataset_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            [
+                "candidate_dataset_version_id",
+                "candidate_dataset_id",
+                "organization_id",
+                "project_id",
+            ],
+            [
+                "candidate_dataset_versions.id",
+                "candidate_dataset_versions.dataset_id",
+                "candidate_dataset_versions.organization_id",
+                "candidate_dataset_versions.project_id",
+            ],
+            name="fk_ingestion_jobs_candidate_dataset_version_tenant",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "organization_id",
             "project_id",
@@ -98,8 +139,12 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
             "id", "organization_id", "project_id", name="uq_ingestion_jobs_tenant_identity"
         ),
         CheckConstraint(
-            "((job_kind = 'parse' AND document_version_id IS NOT NULL AND candidate_dataset_id IS NULL) "
-            "OR (job_kind = 'generate_candidates' AND document_version_id IS NULL AND candidate_dataset_id IS NOT NULL))",
+            "((job_kind = 'parse' AND document_version_id IS NOT NULL AND candidate_dataset_id IS NULL "
+            "AND source_version_id IS NULL AND generation_config_id IS NULL "
+            "AND candidate_dataset_version_id IS NULL) "
+            "OR (job_kind = 'generate_candidates' AND document_version_id IS NULL "
+            "AND candidate_dataset_id IS NOT NULL AND source_version_id IS NOT NULL "
+            "AND generation_config_id IS NOT NULL AND candidate_dataset_version_id IS NOT NULL))",
             name="job_resource_matches_kind",
         ),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
@@ -136,6 +181,9 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
     )
     document_version_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
     candidate_dataset_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    source_version_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    generation_config_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    candidate_dataset_version_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
     attempt_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
@@ -164,10 +212,21 @@ class IngestionJob(UUIDPrimaryKeyMixin, Base):
         overlaps="organization,document_version,candidate_dataset,attempts,lease",
     )
     document_version: Mapped[DocumentVersion | None] = relationship(
-        overlaps="organization,project,attempts,lease"
+        foreign_keys=[document_version_id], overlaps="organization,project,attempts,lease"
     )
     candidate_dataset: Mapped[CandidateDataset | None] = relationship(
-        overlaps="organization,project,document_version,attempts,lease"
+        foreign_keys=[candidate_dataset_id],
+        overlaps="organization,project,document_version,attempts,lease",
+    )
+    source_version: Mapped[DocumentVersion | None] = relationship(
+        foreign_keys=[source_version_id], overlaps="organization,project,attempts,lease"
+    )
+    generation_config: Mapped[CandidateGenerationConfig | None] = relationship(
+        foreign_keys=[generation_config_id], overlaps="organization,project,attempts,lease"
+    )
+    candidate_dataset_version: Mapped[CandidateDatasetVersion | None] = relationship(
+        foreign_keys=[candidate_dataset_version_id],
+        overlaps="organization,project,attempts,lease",
     )
     attempts: Mapped[list[IngestionJobAttempt]] = relationship(
         back_populates="job",

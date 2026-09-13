@@ -3,6 +3,7 @@ from sqlalchemy import BigInteger, CheckConstraint, UniqueConstraint
 from rag_eval_api.models import (
     Base,
     CandidateDatasetItem,
+    CandidateDatasetVersion,
     CandidateGenerationConfig,
     CandidateItemEvidence,
     Document,
@@ -64,6 +65,7 @@ def test_ingestion_model_constraints_cover_idempotency_and_immutable_history() -
         for constraint in IngestionJob.__table__.constraints
     )
     assert CandidateDatasetItem.__table__.c.generation_config_id is not None
+    assert CandidateDatasetVersion.__table__.c.dataset_id is not None
     assert CandidateItemEvidence.__table__.c.source_version_id is not None
     assert isinstance(DocumentVersion.__table__.c.byte_size.type, BigInteger)
     assert isinstance(IngestionJobLease.__table__.c.fencing_token.type, BigInteger)

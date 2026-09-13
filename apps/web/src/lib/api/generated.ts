@@ -250,7 +250,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Candidates
-         * @description Validate an explicit source version before creating generation work.
+         * @description Create a durable generation snapshot when a provider is configured.
          */
         post: operations["generate_candidates_api_projects__project_id__documents__document_id__generate_candidates_post"];
         delete?: never;
@@ -559,6 +559,26 @@ export interface components {
              * Format: uuid
              */
             source_version_id: string;
+        };
+        /** CandidateGenerationJobResponse */
+        CandidateGenerationJobResponse: {
+            /**
+             * Dataset Id
+             * Format: uuid
+             */
+            dataset_id: string;
+            /**
+             * Dataset Version Id
+             * Format: uuid
+             */
+            dataset_version_id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Status */
+            status: string;
         };
         /** CandidateGenerationRequest */
         CandidateGenerationRequest: {
@@ -1566,9 +1586,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["CandidateGenerationJobResponse"];
                 };
             };
             /** @description Validation Error */

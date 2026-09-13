@@ -21,6 +21,13 @@ class CandidateGenerationBlockedResponse(BaseModel):
     message: str
 
 
+class CandidateGenerationJobResponse(BaseModel):
+    job_id: UUID
+    dataset_id: UUID
+    dataset_version_id: UUID
+    status: str
+
+
 class CandidateDatasetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

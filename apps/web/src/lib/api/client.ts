@@ -10,6 +10,8 @@ type CandidateDatasetResponse = components["schemas"]["CandidateDatasetResponse"
 type CandidateDatasetVersionResponse = components["schemas"]["CandidateDatasetVersionResponse"];
 type CandidateItemResponse = components["schemas"]["CandidateItemResponse"];
 type CandidateReviewRequest = components["schemas"]["CandidateReviewRequest"];
+type CandidateGenerationRequest = components["schemas"]["CandidateGenerationRequest"];
+type CandidateGenerationJobResponse = components["schemas"]["CandidateGenerationJobResponse"];
 
 type ErrorEnvelope = {
   error?: {
@@ -51,6 +53,7 @@ export type ApiClient = {
   reviewCandidateItem(projectId: string, datasetId: string, versionId: string, payload: CandidateReviewRequest, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse>;
   publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
+  generateCandidates(projectId: string, documentId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
 };
 
 export function createApiClient({
@@ -130,6 +133,21 @@ export function createApiClient({
       return requestJson<CandidateDatasetVersionResponse>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/archive`,
         { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async generateCandidates(projectId, documentId, payload, options) {
+      return requestJson<CandidateGenerationJobResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}/generate-candidates`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          signal: options?.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey(),
+          },
+        },
+        fetchImpl,
       );
     },
   };

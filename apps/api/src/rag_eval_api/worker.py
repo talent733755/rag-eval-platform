@@ -18,14 +18,51 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from rag_eval_api.candidates.provider import OpenAICompatibleCandidateGenerator
 from rag_eval_api.config import Settings, get_settings
 from rag_eval_api.db import create_engine
 from rag_eval_api.parsers.registry import ParserRegistry
-from rag_eval_api.services.worker import IngestionWorker
+from rag_eval_api.services.candidate_worker import CandidateWorker
+from rag_eval_api.services.worker import IngestionWorker, WorkerBatchResult
 from rag_eval_api.storage.local import LocalBlobStore
 from rag_eval_api.storage.protocol import BlobStore
 
 LOGGER = logging.getLogger("rag_eval_api.worker")
+
+
+class CombinedWorker:
+    """Run parse and candidate jobs behind one runtime polling loop."""
+
+    def __init__(self, ingestion: IngestionWorker, candidates: CandidateWorker | None) -> None:
+        self.ingestion = ingestion
+        self.candidates = candidates
+        self.batch_size = ingestion.batch_size
+        self.session_factory = ingestion.session_factory
+
+    def request_shutdown(self) -> None:
+        self.ingestion.request_shutdown()
+        if self.candidates is not None:
+            self.candidates.request_shutdown()
+
+    async def process_batch(self, limit: int) -> WorkerBatchResult:
+        parse_result = await self.ingestion.process_batch(limit)
+        if parse_result.processed:
+            return parse_result
+        if self.candidates is None:
+            return parse_result
+        candidate_result = await self.candidates.process_batch(limit)
+        return WorkerBatchResult(
+            processed=candidate_result.processed,
+            succeeded=candidate_result.succeeded,
+            failed=candidate_result.failed,
+            cancelled=candidate_result.cancelled,
+            lease_lost=candidate_result.lease_lost,
+        )
+
+    async def run_maintenance(self) -> None:
+        await self.ingestion.run_maintenance()
+        if self.candidates is not None:
+            await self.candidates.run_maintenance()
 
 
 class ReadinessFile:
@@ -80,7 +117,7 @@ class WorkerRuntime:
     def __init__(
         self,
         *,
-        worker: IngestionWorker,
+        worker: CombinedWorker,
         redis: Redis | Any,
         readiness_file: ReadinessFile,
         poll_interval: timedelta,
@@ -202,9 +239,29 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
         heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
         orphan_blob_grace_period=timedelta(seconds=settings.orphan_blob_grace_seconds),
     )
+    candidate_worker = None
+    if settings.provider_base_url is not None and settings.provider_api_key is not None:
+        generator = OpenAICompatibleCandidateGenerator(
+            settings.provider_base_url,
+            api_key=settings.provider_api_key.get_secret_value(),
+            model_name=settings.provider_model_name,
+            app_env=settings.app_env,
+            allowed_hosts=settings.provider_allowed_hosts,
+            allowed_ports=settings.provider_allowed_ports,
+            timeout_seconds=settings.provider_timeout_seconds,
+        )
+        candidate_worker = CandidateWorker(
+            session_factory=session_factory,
+            generator=generator,
+            worker_id=f"candidate-worker-{os.getpid()}",
+            lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
+            batch_size=settings.worker_batch_size,
+            heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
+        )
+    combined_worker = CombinedWorker(worker, candidate_worker)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     runtime = WorkerRuntime(
-        worker=worker,
+        worker=combined_worker,
         redis=redis,
         readiness_file=ReadinessFile(settings.worker_readiness_file),
         poll_interval=timedelta(seconds=settings.worker_poll_interval_seconds),

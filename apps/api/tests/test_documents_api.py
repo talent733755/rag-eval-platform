@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from datetime import timedelta
 from io import BufferedReader
 from typing import BinaryIO
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from rag_eval_api.auth.context import RequestActor, get_current_actor
+from rag_eval_api.candidates.fake import FakeCandidateGenerator
 from rag_eval_api.config import DEFAULT_REDIS_URL, DEFAULT_SECRET_KEY, Settings
 from rag_eval_api.db import get_db_session
 from rag_eval_api.main import create_app
@@ -24,9 +26,13 @@ from rag_eval_api.models import (
     AuditEvent,
     Base,
     CandidateDataset,
+    CandidateDatasetItem,
     CandidateDatasetStatus,
     CandidateDatasetVersion,
+    CandidateGenerationConfig,
+    CandidateItemEvidence,
     Document,
+    DocumentChunk,
     DocumentParseStatus,
     DocumentVersion,
     IngestionJob,
@@ -36,6 +42,12 @@ from rag_eval_api.models import (
     Organization,
     Project,
 )
+from rag_eval_api.schemas.candidates import CandidateGenerationRequest
+from rag_eval_api.services.candidate_generation import (
+    CandidateGenerationError,
+    create_generation_job,
+)
+from rag_eval_api.services.candidate_worker import CandidateWorker
 from rag_eval_api.storage.protocol import StoredBlob
 
 EDITOR_ID = UUID("00000000-0000-0000-0000-000000000201")
@@ -706,3 +718,210 @@ async def test_candidate_dataset_version_can_be_listed_and_published_when_empty(
     assert versions.json()[0]["version_number"] == 1
     assert published.status_code == 200
     assert published.json()["status"] == "published"
+
+
+async def _mark_version_parsed(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    version_id: UUID,
+    organization_id: UUID,
+    project_id: UUID,
+) -> None:
+    content = "The platform stores reproducible evaluation evidence."
+    async with session_factory() as session:
+        version = await session.get(DocumentVersion, version_id)
+        assert version is not None
+        version.parse_status = DocumentParseStatus.succeeded
+        version.parser_version = "markdown-v1"
+        session.add(
+            DocumentChunk(
+                organization_id=organization_id,
+                project_id=project_id,
+                document_version_id=version_id,
+                ordinal=0,
+                content=content,
+                content_hash=hashlib.sha256(content.encode()).hexdigest(),
+                source_location={"paragraph": 0},
+                character_count=len(content),
+                token_count=8,
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_generation_snapshot_is_idempotent_and_captures_chunk_hashes(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="generation-source")
+    document_id = UUID(uploaded.json()["document"]["id"])
+    version_id = UUID(uploaded.json()["document_version"]["id"])
+    await _mark_version_parsed(
+        session_factory,
+        version_id=version_id,
+        organization_id=seed.organization_id,
+        project_id=seed.project_id,
+    )
+    payload = CandidateGenerationRequest(
+        document_version_id=version_id,
+        dataset_name="生成评测集",
+        capability_version="candidate-generation-v1",
+        prompt_version="prompt-v1",
+        seed=7,
+        randomness=0,
+    )
+
+    async with session_factory() as session:
+        first_job, first_version = await create_generation_job(
+            session,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            actor_id=EDITOR_ID,
+            document_id=document_id,
+            idempotency_key="generation-key",
+            payload=payload,
+            provider_name="fake-test",
+            model_name="fixture",
+        )
+        replay_job, replay_version = await create_generation_job(
+            session,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            actor_id=EDITOR_ID,
+            document_id=document_id,
+            idempotency_key="generation-key",
+            payload=payload,
+            provider_name="fake-test",
+            model_name="fixture",
+        )
+        assert replay_job.id == first_job.id
+        assert replay_version.id == first_version.id
+        assert first_job.source_version_id == version_id
+        assert first_job.generation_config_id is not None
+
+        config = await session.get(CandidateGenerationConfig, first_job.generation_config_id)
+        assert config is not None
+        assert config.chunk_content_hashes == [
+            hashlib.sha256(b"The platform stores reproducible evaluation evidence.").hexdigest()
+        ]
+
+        with pytest.raises(CandidateGenerationError, match="Idempotency-Key") as error:
+            await create_generation_job(
+                session,
+                organization_id=seed.organization_id,
+                project_id=seed.project_id,
+                actor_id=EDITOR_ID,
+                document_id=document_id,
+                idempotency_key="generation-key",
+                payload=payload.model_copy(update={"dataset_name": "另一个评测集"}),
+                provider_name="fake-test",
+                model_name="fixture",
+            )
+        assert error.value.code == "idempotency_conflict"
+
+
+@pytest.mark.asyncio
+async def test_candidate_worker_persists_items_and_evidence_with_fenced_attempt(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded = await upload(client, seed.project_id, key="worker-source")
+    document_id = UUID(uploaded.json()["document"]["id"])
+    version_id = UUID(uploaded.json()["document_version"]["id"])
+    await _mark_version_parsed(
+        session_factory,
+        version_id=version_id,
+        organization_id=seed.organization_id,
+        project_id=seed.project_id,
+    )
+    async with session_factory() as session:
+        job, dataset_version = await create_generation_job(
+            session,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            actor_id=EDITOR_ID,
+            document_id=document_id,
+            idempotency_key="worker-key",
+            payload=CandidateGenerationRequest(
+                document_version_id=version_id,
+                dataset_name="Worker 评测集",
+                capability_version="candidate-generation-v1",
+                prompt_version="prompt-v1",
+                seed=3,
+                randomness=0,
+            ),
+            provider_name="fake-test",
+            model_name="fixture",
+        )
+
+    worker = CandidateWorker(
+        session_factory=session_factory,
+        generator=FakeCandidateGenerator(),
+        worker_id="candidate-test-worker",
+        lease_ttl=timedelta(seconds=10),
+    )
+    result = await worker.process_batch(1)
+    assert result.processed == 1
+    assert result.succeeded == 1
+
+    async with session_factory() as session:
+        stored_job = await session.get(IngestionJob, job.id)
+        assert stored_job is not None
+        assert stored_job.status is IngestionJobStatus.succeeded
+        assert stored_job.attempt_count == 1
+        item = await session.scalar(
+            select(CandidateDatasetItem).where(
+                CandidateDatasetItem.dataset_version_id == dataset_version.id
+            )
+        )
+        assert item is not None
+        evidence = await session.scalar(
+            select(CandidateItemEvidence).where(CandidateItemEvidence.item_id == item.id)
+        )
+        assert evidence is not None
+        assert evidence.source_version_id == version_id
+
+
+@pytest.mark.asyncio
+async def test_candidate_generation_requires_configured_provider_before_creating_work(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    response = await client.post(
+        f"/api/projects/{seed.project_id}/documents/{uuid4()}/generate-candidates",
+        headers={"Idempotency-Key": "provider-not-configured"},
+        json={
+            "document_version_id": str(uuid4()),
+            "dataset_name": "评测集",
+            "capability_version": "candidate-generation-v1",
+            "prompt_version": "prompt-v1",
+            "randomness": 0,
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "provider_not_configured"
+    async with session_factory() as session:
+        assert (await session.scalars(select(IngestionJob))).all() == []

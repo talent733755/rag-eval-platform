@@ -39,7 +39,10 @@ def test_ingestion_migration_offline_sql_creates_all_tables_and_avoids_latest_ve
     assert "uq_ingestion_jobs_project_operation_idempotency" in sql
     assert "0003_ingestion_hardening" in sql
     assert "uq_candidate_generation_configs_dataset_tenant_identity" in sql
+    assert "uq_candidate_dataset_versions_dataset_tenant" in sql
     assert "fk_candidate_dataset_items_generation_config_dataset_tenant" in sql
+    assert "0005_candidate_generation_jobs" in sql
+    assert "fk_ingestion_jobs_candidate_dataset_version_tenant" in sql
     assert "candidate_generation_configs_truncate_guard" in sql
     assert "ALTER COLUMN final_status TYPE VARCHAR(10)" in sql
     assert "fencing_token" in sql

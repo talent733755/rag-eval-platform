@@ -311,6 +311,14 @@ class Settings(BaseSettings):
         SecretStr | None,
         Field(validation_alias=AliasChoices("PROVIDER_API_KEY", "provider_api_key")),
     ] = None
+    provider_model_name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=255,
+            validation_alias=AliasChoices("PROVIDER_MODEL_NAME", "provider_model_name"),
+        ),
+    ] = "default"
     provider_timeout_seconds: Annotated[
         int,
         Field(

@@ -57,6 +57,13 @@ class CandidateDatasetVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "id", "organization_id", "project_id", name="uq_candidate_dataset_versions_tenant"
         ),
+        UniqueConstraint(
+            "id",
+            "dataset_id",
+            "organization_id",
+            "project_id",
+            name="uq_candidate_dataset_versions_dataset_tenant",
+        ),
         CheckConstraint("version_number > 0", name="version_number_positive"),
         CheckConstraint(
             "status IN ('draft', 'review', 'published', 'archived')", name="valid_status"
