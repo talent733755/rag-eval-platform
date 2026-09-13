@@ -10,6 +10,22 @@
 
 ## 当前基线与执行约束
 
+## 本轮执行记录（2026-09-13）
+
+已完成并分别提交：
+
+- Worker 独立运行时、readiness、租约续期、维护入口、Compose 服务和集成门禁：`a14bcc5`、`787de91`；
+- 候选生成 v1 契约、确定性 FakeProvider、安全 Provider Transport 和能力检查入口：`8cbf849`、`8acf7d3`、`47bc0ae`；
+- 文档批量上传、归档引用保护、Documents 页面和客户端测试：`3c56424`、`7fe3ab5`；
+- 候选评测集版本表、租户边界查询、审核/发布/归档 API 和评测集页面：`27537be`；
+- `adapter-v1` 契约及受限 HTTP Adapter：`54b46d4`、`d7e7d00`；
+- 可复现检索指标纯函数和 Trace v1/失败分类基础：`5fa4802`、`d2a6fda`；
+- 开源协作、安全、变更记录和契约索引文档。
+
+本轮验证结果：`make lint`、`make typecheck`、`make test` 和 `make build` 均通过；API 非集成测试为 219 passed、2 skipped。`make test-integration` 已执行迁移和基础设施启动，但 Worker 镜像构建阶段受 Docker Hub 对 pinned Python manifest 返回 403 影响，尚未完成真实容器链路验证。
+
+明确未完成项：候选生成尚未实现数据库持久化和候选 Worker；Adapter 尚未接入 CRUD/配置快照和 Python entry point；实验执行器、模型 Provider 快照、指标持久化、Trace/失败数据库、回归集、Dashboard、生产认证和完整 E2E 仍待实现。当前没有使用假数据掩盖这些缺口。
+
 实施分支为 `.worktrees/mvp-foundation-admin-shell`，分支名为 `codex/mvp-foundation-admin-shell`。截至 `16676f3`，以下能力已经存在并通过现有质量门禁：
 
 - 组织、项目、成员角色、权限和审计基础；
