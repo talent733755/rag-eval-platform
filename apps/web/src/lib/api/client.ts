@@ -23,6 +23,8 @@ type ExperimentResponse = components["schemas"]["ExperimentResponse"];
 type ExperimentStartResponse = components["schemas"]["ExperimentStartResponse"];
 type ExperimentRunResponse = components["schemas"]["ExperimentRunResponse"];
 type ExperimentRunItemResponse = components["schemas"]["ExperimentRunItemResponse"];
+type MetricDefinitionResponse = components["schemas"]["MetricDefinitionResponse"];
+type MetricResultResponse = components["schemas"]["MetricResultResponse"];
 
 type ErrorEnvelope = {
   error?: {
@@ -84,6 +86,11 @@ export type ApiClient = {
   cancelExperimentRun(projectId: string, runId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunResponse>;
   listExperimentRunItems(projectId: string, runId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunItemResponse[]>;
   retryExperimentRunItem(projectId: string, runId: string, itemId: string, options?: { signal?: AbortSignal }): Promise<ExperimentRunItemResponse>;
+  listMetricDefinitions(projectId: string, options?: { signal?: AbortSignal }): Promise<MetricDefinitionResponse[]>;
+  listExperimentMetrics(projectId: string, experimentId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
+  listRunMetrics(projectId: string, experimentId: string, runId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
+  listSampleMetrics(projectId: string, experimentId: string, runId: string, itemId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
+  recalculateRunMetrics(projectId: string, experimentId: string, runId: string, options?: { signal?: AbortSignal }): Promise<MetricResultResponse[]>;
 };
 
 export function createApiClient({
@@ -291,6 +298,36 @@ export function createApiClient({
     async retryExperimentRunItem(projectId, runId, itemId, options) {
       return requestJson<ExperimentRunItemResponse>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/retry`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listMetricDefinitions(projectId, options) {
+      return requestJson<MetricDefinitionResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/metric-definitions`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listExperimentMetrics(projectId, experimentId, options) {
+      return requestJson<MetricResultResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/metrics`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listRunMetrics(projectId, experimentId, runId, options) {
+      return requestJson<MetricResultResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/metrics`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async listSampleMetrics(projectId, experimentId, runId, itemId, options) {
+      return requestJson<MetricResultResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/metrics`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async recalculateRunMetrics(projectId, experimentId, runId, options) {
+      return requestJson<MetricResultResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/metrics/recalculate`,
         { method: "POST", signal: options?.signal }, fetchImpl,
       );
     },

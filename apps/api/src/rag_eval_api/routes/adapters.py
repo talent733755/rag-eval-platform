@@ -61,7 +61,9 @@ def _validate_adapter_shape(
     if kind is AdapterKind.python and not entrypoint_ref:
         raise _error(422, "validation_error", "Python adapters require an entry point reference.")
     if kind is AdapterKind.http and entrypoint_ref:
-        raise _error(422, "validation_error", "HTTP adapters do not accept an entry point reference.")
+        raise _error(
+            422, "validation_error", "HTTP adapters do not accept an entry point reference."
+        )
 
 
 @router.get("", response_model=list[AdapterConfigResponse])
@@ -166,7 +168,9 @@ async def update_adapter(
         await db_session.commit()
     except IntegrityError as exc:
         await db_session.rollback()
-        raise _error(409, "adapter_name_conflict", "Adapter name already exists in this project.") from exc
+        raise _error(
+            409, "adapter_name_conflict", "Adapter name already exists in this project."
+        ) from exc
     return adapter
 
 
@@ -193,7 +197,9 @@ async def delete_adapter(
         await db_session.commit()
     except IntegrityError as exc:
         await db_session.rollback()
-        raise _error(409, "adapter_in_use", "Adapter cannot be deleted while it is referenced.") from exc
+        raise _error(
+            409, "adapter_in_use", "Adapter cannot be deleted while it is referenced."
+        ) from exc
 
 
 @router.post("/{adapter_id}/test", response_model=AdapterConfigResponse)
@@ -208,7 +214,9 @@ async def test_adapter(
     if adapter.credential_ref and token is None:
         adapter.last_test_status = AdapterTestStatus.failed
         await db_session.commit()
-        raise _error(503, "adapter_credentials_unavailable", "Adapter credential reference is not available.")
+        raise _error(
+            503, "adapter_credentials_unavailable", "Adapter credential reference is not available."
+        )
 
     try:
         settings = request.app.state.settings
@@ -243,11 +251,15 @@ async def test_adapter(
     except AdapterError as exc:
         adapter.last_test_status = AdapterTestStatus.failed
         await db_session.commit()
-        raise _error(503 if exc.retryable else 502, exc.code, "Adapter connection test failed safely.") from exc
+        raise _error(
+            503 if exc.retryable else 502, exc.code, "Adapter connection test failed safely."
+        ) from exc
     except (TypeError, ValueError) as exc:
         adapter.last_test_status = AdapterTestStatus.failed
         await db_session.commit()
-        raise _error(422, "adapter_configuration_invalid", "Adapter configuration is not allowed.") from exc
+        raise _error(
+            422, "adapter_configuration_invalid", "Adapter configuration is not allowed."
+        ) from exc
 
     adapter.last_test_status = AdapterTestStatus.succeeded
     record_audit_event(

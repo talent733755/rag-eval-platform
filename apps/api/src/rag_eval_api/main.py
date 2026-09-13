@@ -35,6 +35,7 @@ from rag_eval_api.routes.candidates import router as candidates_router
 from rag_eval_api.routes.documents import job_router as ingestion_jobs_router
 from rag_eval_api.routes.documents import router as documents_router
 from rag_eval_api.routes.experiments import router as experiments_router
+from rag_eval_api.routes.metrics import router as metrics_router
 from rag_eval_api.routes.model_providers import router as model_providers_router
 from rag_eval_api.routes.projects import router as projects_router
 from rag_eval_api.storage.local import LocalBlobStore
@@ -232,6 +233,7 @@ def create_app(settings: Settings | None = None, blob_store: BlobStore | None = 
     application.include_router(adapters_router)
     application.include_router(model_providers_router)
     application.include_router(experiments_router)
+    application.include_router(metrics_router)
 
     @application.get("/health/live", response_model=None)
     async def liveness() -> dict[str, str]:

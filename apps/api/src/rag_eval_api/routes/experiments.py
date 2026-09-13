@@ -39,12 +39,15 @@ from rag_eval_api.services.experiment_validation import (
     ExperimentDraftValidationError,
     validate_experiment_draft,
 )
+from rag_eval_api.services.metric_calculation import ensure_metric_definitions
 
 router = APIRouter(prefix="/api/projects/{project_id}/experiments", tags=["experiments"])
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status_code=status_code, detail={"error": {"code": code, "message": message}})
+    return HTTPException(
+        status_code=status_code, detail={"error": {"code": code, "message": message}}
+    )
 
 
 async def _get_experiment(
@@ -93,7 +96,9 @@ async def create_experiment(
     try:
         validated = await validate_experiment_draft(db_session, access, payload)
     except ExperimentDraftValidationError as exc:
-        status_code = 404 if exc.code == "not_found" else 409 if exc.code.endswith("unpublished") else 422
+        status_code = (
+            404 if exc.code == "not_found" else 409 if exc.code.endswith("unpublished") else 422
+        )
         raise _error(status_code, exc.code, str(exc)) from exc
     snapshot = create_snapshot(
         ExperimentSnapshotInput(
@@ -128,6 +133,13 @@ async def create_experiment(
         total_units=validated.dataset_item_count,
         created_by=access.actor.user_id,
     )
+    await ensure_metric_definitions(
+        db_session,
+        organization_id=organization_id,
+        project_id=project_id,
+        metric_versions=validated.metric_versions,
+        created_by=access.actor.user_id,
+    )
     db_session.add(experiment)
     record_audit_event(
         db_session,
@@ -152,7 +164,11 @@ async def create_experiment(
         )
         if existing is not None:
             return existing
-        raise _error(409, "experiment_idempotency_conflict", "Experiment request conflicts with an existing operation.") from exc
+        raise _error(
+            409,
+            "experiment_idempotency_conflict",
+            "Experiment request conflicts with an existing operation.",
+        ) from exc
     return experiment
 
 
@@ -196,7 +212,9 @@ async def start_experiment(
         ).all()
     )
     if not items:
-        raise _error(409, "dataset_has_no_accepted_items", "Published dataset has no accepted items.")
+        raise _error(
+            409, "dataset_has_no_accepted_items", "Published dataset has no accepted items."
+        )
     run = ExperimentRun(
         organization_id=access.actor.organization_id,
         project_id=access.project.id,
@@ -241,9 +259,7 @@ async def get_experiment(
     return await _get_experiment(experiment_id, access, db_session)
 
 
-async def _get_run(
-    run_id: UUID, access: ProjectAccess, db_session: AsyncSession
-) -> ExperimentRun:
+async def _get_run(run_id: UUID, access: ProjectAccess, db_session: AsyncSession) -> ExperimentRun:
     run = await db_session.scalar(
         select(ExperimentRun).where(
             ExperimentRun.id == run_id,
@@ -316,7 +332,11 @@ async def cancel_experiment_run(
     db_session: AsyncSession = Depends(get_db_session),
 ) -> ExperimentRun:
     run = await _get_run(run_id, access, db_session)
-    if run.status in {ExperimentRunStatus.succeeded, ExperimentRunStatus.failed, ExperimentRunStatus.cancelled}:
+    if run.status in {
+        ExperimentRunStatus.succeeded,
+        ExperimentRunStatus.failed,
+        ExperimentRunStatus.cancelled,
+    }:
         raise _error(409, "run_not_cancellable", "Run is already terminal.")
     now = datetime.now(UTC)
     if run.status is ExperimentRunStatus.queued:
@@ -343,7 +363,11 @@ async def cancel_experiment_run(
         run.status = ExperimentRunStatus.cancelling
     experiment = await db_session.get(Experiment, run.experiment_id)
     if experiment is not None:
-        experiment.status = ExperimentStatus.cancelled if run.status is ExperimentRunStatus.cancelled else ExperimentStatus.cancelling
+        experiment.status = (
+            ExperimentStatus.cancelled
+            if run.status is ExperimentRunStatus.cancelled
+            else ExperimentStatus.cancelling
+        )
         if run.status is ExperimentRunStatus.cancelled:
             experiment.completed_at = now
     record_audit_event(

@@ -34,12 +34,16 @@ async def validate_experiment_draft(
     """Validate all mutable references while retaining the tenant boundary."""
 
     if payload.random_seed is None:
-        raise ExperimentDraftValidationError("random_seed_required", "An explicit random seed is required.")
+        raise ExperimentDraftValidationError(
+            "random_seed_required", "An explicit random seed is required."
+        )
     parameter_bytes = json.dumps(
         payload.parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
     if len(parameter_bytes) > 64 * 1024:
-        raise ExperimentDraftValidationError("parameters_too_large", "Experiment parameters exceed 64 KiB.")
+        raise ExperimentDraftValidationError(
+            "parameters_too_large", "Experiment parameters exceed 64 KiB."
+        )
 
     dataset_version = await db_session.scalar(
         select(CandidateDatasetVersion).where(
@@ -52,7 +56,8 @@ async def validate_experiment_draft(
         raise ExperimentDraftValidationError("not_found", "Dataset version was not found.")
     if dataset_version.status is not CandidateDatasetStatus.published:
         raise ExperimentDraftValidationError(
-            "dataset_version_unpublished", "Only a published dataset version can start an experiment."
+            "dataset_version_unpublished",
+            "Only a published dataset version can start an experiment.",
         )
 
     adapter = await db_session.scalar(
@@ -62,9 +67,14 @@ async def validate_experiment_draft(
             AdapterConfig.project_id == access.project.id,
         )
     )
-    if adapter is None or not adapter.enabled or adapter.last_test_status is not AdapterTestStatus.succeeded:
+    if (
+        adapter is None
+        or not adapter.enabled
+        or adapter.last_test_status is not AdapterTestStatus.succeeded
+    ):
         raise ExperimentDraftValidationError(
-            "adapter_unavailable", "Adapter must be enabled and pass a connection test before starting."
+            "adapter_unavailable",
+            "Adapter must be enabled and pass a connection test before starting.",
         )
 
     provider = await db_session.scalar(

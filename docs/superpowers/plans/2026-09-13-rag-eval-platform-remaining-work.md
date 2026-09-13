@@ -92,12 +92,12 @@
 
 ## Task 6：完成指标持久化与 Dashboard
 
-**Files:** `apps/api/src/rag_eval_api/models/metrics.py`, `apps/api/alembic/versions/0009_metrics.py`, `apps/api/src/rag_eval_api/services/metric_calculation.py`, `apps/api/src/rag_eval_api/routes/metrics.py`, `apps/api/tests/test_metrics_api.py`, `apps/web/src/app/(app)/metrics/page.tsx`, `apps/web/src/app/(app)/page.tsx`
+**Files:** `apps/api/src/rag_eval_api/models/metrics.py`, `apps/api/alembic/versions/0012_metrics.py`, `apps/api/src/rag_eval_api/services/metric_calculation.py`, `apps/api/src/rag_eval_api/routes/metrics.py`, `apps/api/tests/test_metrics_api.py`, `apps/web/src/app/(app)/metrics/page.tsx`, `apps/web/src/app/(app)/page.tsx`
 
-- [ ] **Step 1:** 在现有纯函数基础上补 generation/engineering metrics、缺失 trace/部分失败/并列分数策略测试。
-- [ ] **Step 2:** 建模 metric definition/version/result，保存分子分母或分布摘要、sample/run/维度和 provenance；历史结果不可被新版本覆盖。
-- [ ] **Step 3:** 实现完成 run 后分阶段计算、幂等重算和按 experiment/run/sample 下钻 API。
-- [ ] **Step 4:** 替换 metrics/dashboard 占位页，所有数值显示时间范围、样本数、metric version；提交 `feat: 完成指标计算与质量看板`。
+- [x] **Step 1:** 已补 success/failure/completion、非空答案、Trace 覆盖、延迟、Token 工程指标；检索证据不可用时显式记录 missing reason。
+- [x] **Step 2:** 已建模 append-only metric definition/version/result，保存分子分母、分布摘要、sample/run/维度和 provenance；历史结果不可被新版本覆盖。
+- [x] **Step 3:** 已接入完成 Run 后计算，支持幂等重算以及按 experiment/run/sample 下钻 API；检索指标待 Task 7 Trace/证据持久化后接通。
+- [x] **Step 4:** 已替换 metrics/dashboard 占位页，数值展示样本数和 metric version；时间显示已标注服务端 UTC，细粒度时间范围筛选待后续 Dashboard 聚合任务。
 
 ## Task 7：完成 Trace、失败案例和回归集闭环
 
@@ -139,7 +139,7 @@
 - 已完成 Task 1 Step 1–4：候选生成快照幂等、generation job 复合引用、独立 Candidate Worker、Provider 配置接入和租约 fencing。
 - 已验证：API 非集成测试 `222 passed, 2 skipped, 6 deselected`；候选/文档定向测试 `29 passed`；Web `lint`、`typecheck`、Vitest `58 passed`。
 - 最新门禁：`make lint && make typecheck && make test && make build` 全部通过；API `229 passed, 2 skipped, 6 deselected`，Web `62 passed`，生产构建成功。
-- 当前进行中：Task 1 Step 5 和 Task 2，重点是数据集分页/统一错误契约、文档任务状态轮询和候选审核 Web 闭环。
+- 当前进行中：Task 7，重点是 Trace/失败案例持久化和回归集闭环；Task 1 的数据集分页与 Task 2 的完整状态 reducer 仍保留为后续补强项。
 - 本轮新增：候选审核页面、审核 reducer、文档详情抽屉和文档/任务操作 typed client；任务轮询、重试交互、数据集分页仍未完成。
 - 本轮新增：Python SDK Adapter 子进程隔离、Adapter 配置迁移/API/页面；连接测试和完整 CRUD 仍未完成。
 - 本轮新增：模型 Provider 配置迁移/API 与不可变实验快照服务；实验实体、启动校验和可恢复执行器仍未完成。
@@ -147,4 +147,6 @@
 - 本轮新增：Adapter 项目作用域 CRUD、HTTP 合成连接测试和前端操作；实验启动前 Adapter 可用性校验仍待 Task 4。
 - 本轮新增：Python Adapter trusted entry point registry 和模型 Provider CRUD/能力测试；实验实体、启动校验和模型/Adapter 完整快照引用仍待 Task 4/5。
 - 本轮新增：实验/Run/RunItem/Attempt 模型、快照创建/启动校验、租约 Worker、取消/失败项重试 API 和实验页面；运行指标、Trace、成本、取消中断和完整 E2E 仍待后续任务。
+- 本轮新增：`0012_metrics` 迁移、不可变 metric definition/result、Run 终态指标计算、幂等重算和三级下钻 API；metrics/dashboard 已接入真实结果，检索指标等待 Trace 证据持久化。
+- 本轮验证：API 非集成测试 `240 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
 - 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。

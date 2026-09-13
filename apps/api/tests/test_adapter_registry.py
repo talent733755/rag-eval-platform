@@ -47,7 +47,11 @@ def test_registry_rejects_missing_or_ambiguous_entry_point(monkeypatch: Any) -> 
             timeout_seconds=2,
         )
 
-    monkeypatch.setattr(registry, "entry_points", lambda **kwargs: [FakeEntryPoint(object()), FakeEntryPoint(object())])
+    monkeypatch.setattr(
+        registry,
+        "entry_points",
+        lambda **kwargs: [FakeEntryPoint(object()), FakeEntryPoint(object())],
+    )
     with pytest.raises(AdapterError, match="ambiguous"):
         load_python_adapter(
             "duplicate",

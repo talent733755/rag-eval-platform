@@ -24,7 +24,9 @@ class ModelProviderConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "model_provider_configs"
     __table_args__ = (
         UniqueConstraint("organization_id", "project_id", "name", name="uq_model_providers_name"),
-        UniqueConstraint("id", "organization_id", "project_id", name="uq_model_provider_configs_tenant"),
+        UniqueConstraint(
+            "id", "organization_id", "project_id", name="uq_model_provider_configs_tenant"
+        ),
         CheckConstraint("length(trim(name)) > 0", name="model_provider_name_nonempty"),
         CheckConstraint(
             "timeout_seconds > 0 AND timeout_seconds <= 300", name="model_provider_timeout_range"

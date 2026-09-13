@@ -3,6 +3,7 @@
 - [`document-ingestion-v1.md`](document-ingestion-v1.md)：文档上传、版本、解析任务和 Worker 状态。
 - [`candidate-generation-v1.md`](candidate-generation-v1.md)：候选生成请求、证据和 Provider 错误。
 - [`adapter-v1.md`](adapter-v1.md)：RAG Adapter 请求、响应、引用、用量和 Trace。
+- [`metrics-v1.md`](metrics-v1.md)：指标纯函数、缺失语义、版本和结果持久化契约。
 - [`experiment-v1.md`](experiment-v1.md)：实验草稿启动校验和不可变快照边界。
 
 Adapter 配置 API 使用项目权限：成员可读，编辑者可改，管理员可删。Python Adapter 的

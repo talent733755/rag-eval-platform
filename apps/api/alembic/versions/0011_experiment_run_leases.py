@@ -13,9 +13,16 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("experiment_runs", sa.Column("worker_id", sa.String(length=255), nullable=True))
-    op.add_column("experiment_runs", sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("experiment_runs", sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("experiment_runs", sa.Column("fencing_token", sa.Integer(), nullable=False, server_default="0"))
+    op.add_column(
+        "experiment_runs", sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "experiment_runs", sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "experiment_runs",
+        sa.Column("fencing_token", sa.Integer(), nullable=False, server_default="0"),
+    )
 
 
 def downgrade() -> None:

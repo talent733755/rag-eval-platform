@@ -16,7 +16,9 @@ def upgrade() -> None:
     op.execute("UPDATE experiments SET idempotency_key = CAST(id AS VARCHAR(255))")
     op.alter_column("experiments", "idempotency_key", nullable=False)
     op.create_unique_constraint(
-        "uq_experiments_idempotency", "experiments", ["organization_id", "project_id", "idempotency_key"]
+        "uq_experiments_idempotency",
+        "experiments",
+        ["organization_id", "project_id", "idempotency_key"],
     )
 
 

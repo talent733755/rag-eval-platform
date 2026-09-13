@@ -26,6 +26,7 @@ from rag_eval_api.models import (
     ExperimentRunStatus,
     ExperimentStatus,
 )
+from rag_eval_api.services.metric_calculation import calculate_completed_run_metrics
 
 LOGGER = logging.getLogger(__name__)
 AdapterFactory = Callable[[AdapterConfig], Adapter]
@@ -139,7 +140,9 @@ class ExperimentWorker:
                     await session.scalars(
                         select(ExperimentRun)
                         .where(
-                            ExperimentRun.status.in_([ExperimentRunStatus.queued, ExperimentRunStatus.running]),
+                            ExperimentRun.status.in_(
+                                [ExperimentRunStatus.queued, ExperimentRunStatus.running]
+                            ),
                             (
                                 (ExperimentRun.status == ExperimentRunStatus.queued)
                                 | (ExperimentRun.worker_id == self.worker_id)
@@ -166,7 +169,11 @@ class ExperimentWorker:
                 )
                 if item is None:
                     if run.status is ExperimentRunStatus.running:
-                        run.status = ExperimentRunStatus.succeeded if run.failed_units == 0 else ExperimentRunStatus.failed
+                        run.status = (
+                            ExperimentRunStatus.succeeded
+                            if run.failed_units == 0
+                            else ExperimentRunStatus.failed
+                        )
                         run.completed_at = now
                     elif run.status is ExperimentRunStatus.cancelling:
                         run.status = ExperimentRunStatus.cancelled
@@ -242,8 +249,11 @@ class ExperimentWorker:
                     select(AdapterConfig).where(
                         AdapterConfig.organization_id == claim.organization_id,
                         AdapterConfig.project_id == claim.project_id,
-                        AdapterConfig.id == (
-                            select(Experiment.adapter_config_id).where(Experiment.id == claim.experiment_id).scalar_subquery()
+                        AdapterConfig.id
+                        == (
+                            select(Experiment.adapter_config_id)
+                            .where(Experiment.id == claim.experiment_id)
+                            .scalar_subquery()
                         ),
                     )
                 )
@@ -266,10 +276,24 @@ class ExperimentWorker:
             status = "failed"
             error_code, error_message = exc.code, "Adapter request failed safely."
         except Exception:
-            LOGGER.exception("experiment run item failed", extra={"event": "experiment.item_failed", "run_item_id": str(claim.run_item_id)})
+            LOGGER.exception(
+                "experiment run item failed",
+                extra={"event": "experiment.item_failed", "run_item_id": str(claim.run_item_id)},
+            )
             status = "failed"
             error_code, error_message = "adapter_error", "Adapter request failed safely."
-        return await self._finish(claim, status, response, error_code, error_message)
+        outcome = await self._finish(claim, status, response, error_code, error_message)
+        if outcome != "lease_lost":
+            try:
+                await calculate_completed_run_metrics(self.session_factory, claim.run_id)
+            except Exception:
+                # Metrics are derived data. Keep the terminal run outcome durable
+                # and let the explicit recalculation endpoint repair this failure.
+                LOGGER.exception(
+                    "experiment metrics calculation failed",
+                    extra={"event": "experiment.metrics_failed", "run_id": str(claim.run_id)},
+                )
+        return outcome
 
     async def _finish(
         self,
@@ -348,7 +372,9 @@ class ExperimentWorker:
                 remaining = await session.scalar(
                     select(func.count(ExperimentRunItem.id)).where(
                         ExperimentRunItem.run_id == run.id,
-                        ExperimentRunItem.status.in_([ExperimentRunItemStatus.queued, ExperimentRunItemStatus.processing]),
+                        ExperimentRunItem.status.in_(
+                            [ExperimentRunItemStatus.queued, ExperimentRunItemStatus.processing]
+                        ),
                     )
                 )
                 if remaining == 0:

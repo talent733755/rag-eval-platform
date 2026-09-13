@@ -25,8 +25,10 @@ from rag_eval_api.models import (
     ExperimentRunItemStatus,
     ExperimentRunStatus,
     ExperimentStatus,
+    MetricResult,
 )
 from rag_eval_api.services.experiment_worker import ExperimentWorker
+from rag_eval_api.services.metric_calculation import calculate_completed_run_metrics
 
 
 class FakeAdapter:
@@ -66,7 +68,12 @@ async def test_experiment_worker_records_success_and_attempt_history(
         dataset_version_id=uuid4(),
         adapter_config_id=adapter_id,
         model_provider_id=uuid4(),
-        metric_versions={"retrieval": "v1"},
+        metric_versions={
+            "retrieval": "v1",
+            "success_rate": "engineering-v1",
+            "answer_nonempty_rate": "generation-v1",
+            "average_latency_ms": "engineering-v1",
+        },
         parameters={},
         random_seed=1,
         configuration_snapshot={},
@@ -140,7 +147,24 @@ async def test_experiment_worker_records_success_and_attempt_history(
         attempt = await session.scalar(
             select(ExperimentRunAttempt).where(ExperimentRunAttempt.run_item_id == run_item_id)
         )
+        metric_results = list(
+            (
+                await session.scalars(
+                    select(MetricResult).where(
+                        MetricResult.run_id == run_id,
+                        MetricResult.scope_key == "run",
+                    )
+                )
+            ).all()
+        )
         assert stored_item is not None and stored_item.status is ExperimentRunItemStatus.succeeded
         assert stored_item.final_answer == "测试答案"
         assert stored_run is not None and stored_run.status is ExperimentRunStatus.succeeded
         assert attempt is not None and attempt.attempt_number == 1
+        by_key = {result.metric_key: result for result in metric_results}
+        assert by_key["retrieval"].missing_reason == "retrieval_evidence_unavailable"
+        assert by_key["success_rate"].value == 1
+        assert by_key["answer_nonempty_rate"].value == 1
+        assert by_key["average_latency_ms"].value == 3
+
+    assert await calculate_completed_run_metrics(session_factory, run_id) == 0

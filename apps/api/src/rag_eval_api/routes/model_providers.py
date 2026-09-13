@@ -102,7 +102,11 @@ async def create_model_provider(
         await db_session.commit()
     except IntegrityError as exc:
         await db_session.rollback()
-        raise _error(409, "model_provider_name_conflict", "Model provider name already exists in this project.") from exc
+        raise _error(
+            409,
+            "model_provider_name_conflict",
+            "Model provider name already exists in this project.",
+        ) from exc
     return provider
 
 
@@ -141,7 +145,11 @@ async def update_model_provider(
         await db_session.commit()
     except IntegrityError as exc:
         await db_session.rollback()
-        raise _error(409, "model_provider_name_conflict", "Model provider name already exists in this project.") from exc
+        raise _error(
+            409,
+            "model_provider_name_conflict",
+            "Model provider name already exists in this project.",
+        ) from exc
     return provider
 
 
@@ -168,7 +176,9 @@ async def delete_model_provider(
         await db_session.commit()
     except IntegrityError as exc:
         await db_session.rollback()
-        raise _error(409, "model_provider_in_use", "Model provider cannot be deleted while referenced.") from exc
+        raise _error(
+            409, "model_provider_in_use", "Model provider cannot be deleted while referenced."
+        ) from exc
 
 
 @router.post("/{provider_id}/test", response_model=ModelProviderResponse)
@@ -183,7 +193,11 @@ async def test_model_provider(
     if token is None:
         provider.last_test_status = ModelProviderTestStatus.failed
         await db_session.commit()
-        raise _error(503, "provider_credentials_unavailable", "Provider credential reference is not available.")
+        raise _error(
+            503,
+            "provider_credentials_unavailable",
+            "Provider credential reference is not available.",
+        )
     settings = request.app.state.settings
     try:
         transport = ProviderTransport(
@@ -194,19 +208,25 @@ async def test_model_provider(
             allowed_ports=settings.provider_allowed_ports,
             timeout_seconds=provider.timeout_seconds,
         )
-        transport.post_json({
-            "model": provider.model_name,
-            "messages": [{"role": "user", "content": "连接测试"}],
-            "max_tokens": 1,
-        })
+        transport.post_json(
+            {
+                "model": provider.model_name,
+                "messages": [{"role": "user", "content": "连接测试"}],
+                "max_tokens": 1,
+            }
+        )
     except ProviderTransportError as exc:
         provider.last_test_status = ModelProviderTestStatus.failed
         await db_session.commit()
-        raise _error(503 if exc.retryable else 502, exc.code, "Model provider connection test failed safely.") from exc
+        raise _error(
+            503 if exc.retryable else 502, exc.code, "Model provider connection test failed safely."
+        ) from exc
     except (TypeError, ValueError) as exc:
         provider.last_test_status = ModelProviderTestStatus.failed
         await db_session.commit()
-        raise _error(422, "provider_configuration_invalid", "Model provider configuration is not allowed.") from exc
+        raise _error(
+            422, "provider_configuration_invalid", "Model provider configuration is not allowed."
+        ) from exc
     provider.last_test_status = ModelProviderTestStatus.succeeded
     record_audit_event(
         db_session,

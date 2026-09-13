@@ -25,7 +25,9 @@ class MetricResult(BaseModel):
 
     metric_name: str = Field(min_length=1, max_length=100)
     version: str = Field(min_length=1, max_length=50)
-    value: float | None = Field(default=None, ge=0, le=1)
+    # Retrieval metrics are bounded, while engineering metrics such as
+    # latency and token counts use their natural units.
+    value: float | None = Field(default=None)
     sample_count: int = Field(ge=0)
     missing_reason: str | None = None
     provenance: dict[str, str] = Field(default_factory=dict)

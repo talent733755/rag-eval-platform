@@ -1060,9 +1060,7 @@ async def test_adapter_connection_test_records_failure_without_leaking_credentia
         },
     )
     adapter_id = created.json()["id"]
-    tested = await client.post(
-        f"/api/projects/{seed.project_id}/adapters/{adapter_id}/test"
-    )
+    tested = await client.post(f"/api/projects/{seed.project_id}/adapters/{adapter_id}/test")
     assert tested.status_code == 503
     assert tested.json()["error"]["code"] == "adapter_credentials_unavailable"
     assert "MISSING_RAG_ADAPTER_TOKEN" not in tested.text
@@ -1148,9 +1146,7 @@ async def test_model_provider_crud_and_connection_failure_are_tenant_scoped(
         assert stored.last_test_status.value == "failed"
 
     set_actor(ADMIN_ID)
-    deleted = await client.delete(
-        f"/api/projects/{seed.project_id}/model-providers/{provider_id}"
-    )
+    deleted = await client.delete(f"/api/projects/{seed.project_id}/model-providers/{provider_id}")
     assert deleted.status_code == 204
 
 
@@ -1316,6 +1312,15 @@ async def test_experiment_create_freezes_snapshot_and_start_requires_accepted_it
     assert created.status_code == 201
     assert created.json()["status"] == "draft"
     assert len(created.json()["environment_hash"]) == 64
+    definitions = await client.get(f"/api/projects/{seed.project_id}/metric-definitions")
+    assert definitions.status_code == 200
+    assert [(item["metric_key"], item["version"]) for item in definitions.json()] == [
+        ("retrieval", "v1")
+    ]
+    metrics = await client.get(
+        f"/api/projects/{seed.project_id}/experiments/{created.json()['id']}/metrics"
+    )
+    assert metrics.status_code == 200 and metrics.json() == []
     replayed = await client.post(
         f"/api/projects/{seed.project_id}/experiments",
         headers={"Idempotency-Key": "experiment-1"},
@@ -1343,7 +1348,9 @@ async def test_experiment_run_can_be_cancelled_and_failed_item_requeued(
     client, seed, set_actor, session_factory, _ = document_api_environment
     set_actor(EDITOR_ID)
     experiment_id, run_id, item_id = uuid4(), uuid4(), uuid4()
-    dataset_id, version_id, document_id, document_version_id, config_id = (uuid4() for _ in range(5))
+    dataset_id, version_id, document_id, document_version_id, config_id = (
+        uuid4() for _ in range(5)
+    )
     adapter_id, provider_id, candidate_id = uuid4(), uuid4(), uuid4()
     async with session_factory() as session:
         dataset = CandidateDataset(
@@ -1479,7 +1486,18 @@ async def test_experiment_run_can_be_cancelled_and_failed_item_requeued(
             error_message="Adapter request timed out.",
         )
         item.candidate_item_id = candidate_id
-        session.add_all([dataset, version, document, document_version, generation_config, candidate, adapter, provider])
+        session.add_all(
+            [
+                dataset,
+                version,
+                document,
+                document_version,
+                generation_config,
+                candidate,
+                adapter,
+                provider,
+            ]
+        )
         await session.flush()
         session.add_all([experiment, run, item])
         await session.commit()

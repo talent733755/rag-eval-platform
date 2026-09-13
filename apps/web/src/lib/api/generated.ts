@@ -474,6 +474,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/experiments/{experiment_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Experiment Metrics */
+        get: operations["list_experiment_metrics_api_projects__project_id__experiments__experiment_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/experiments/{experiment_id}/runs": {
         parameters: {
             query?: never;
@@ -485,6 +502,57 @@ export interface paths {
         get: operations["list_experiment_runs_api_projects__project_id__experiments__experiment_id__runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/items/{item_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sample Metrics */
+        get: operations["list_sample_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__items__item_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Run Metrics */
+        get: operations["list_run_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/metrics/recalculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recalculate Run Metrics */
+        post: operations["recalculate_run_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__metrics_recalculate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -576,6 +644,23 @@ export interface paths {
         head?: never;
         /** Update Project Member */
         patch: operations["update_project_member_api_projects__project_id__members__membership_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/metric-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Metric Definitions */
+        get: operations["list_metric_definitions_api_projects__project_id__metric_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/projects/{project_id}/model-providers": {
@@ -1575,6 +1660,108 @@ export interface components {
          * @enum {string}
          */
         MembershipRole: "admin" | "editor" | "viewer";
+        /** MetricDefinitionResponse */
+        MetricDefinitionResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /** Definition */
+            definition: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Metric Key */
+            metric_key: string;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Stage */
+            stage: string;
+            /** Version */
+            version: string;
+        };
+        /** MetricResultResponse */
+        MetricResultResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Denominator */
+            denominator: number | null;
+            /** Dimensions */
+            dimensions: {
+                [key: string]: unknown;
+            };
+            /** Distribution */
+            distribution: {
+                [key: string]: unknown;
+            };
+            /**
+             * Experiment Id
+             * Format: uuid
+             */
+            experiment_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Metric Definition Id
+             * Format: uuid
+             */
+            metric_definition_id: string;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Version */
+            metric_version: string;
+            /** Missing Reason */
+            missing_reason: string | null;
+            /** Numerator */
+            numerator: number | null;
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            };
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Run Item Id */
+            run_item_id: string | null;
+            /** Sample Count */
+            sample_count: number;
+            /** Scope */
+            scope: string;
+            /** Scope Key */
+            scope_key: string;
+            /** Value */
+            value: number | null;
+        };
         /** ModelProviderCreate */
         ModelProviderCreate: {
             /** Credential Ref */
@@ -2801,6 +2988,38 @@ export interface operations {
             };
         };
     };
+    list_experiment_metrics_api_projects__project_id__experiments__experiment_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricResultResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_experiment_runs_api_projects__project_id__experiments__experiment_id__runs_get: {
         parameters: {
             query?: never;
@@ -2820,6 +3039,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExperimentRunResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sample_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__items__item_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: string;
+                run_id: string;
+                item_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricResultResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_run_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: string;
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricResultResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recalculate_run_metrics_api_projects__project_id__experiments__experiment_id__runs__run_id__metrics_recalculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: string;
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricResultResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -3048,6 +3367,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_metric_definitions_api_projects__project_id__metric_definitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"][];
                 };
             };
             /** @description Validation Error */

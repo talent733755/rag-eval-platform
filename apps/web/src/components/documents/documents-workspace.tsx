@@ -82,10 +82,12 @@ export function DocumentsWorkspace() {
         return next;
       });
       const failed = result.items.filter((item) => item.status === "failed");
+      const refreshed = await client.listDocuments(projectId, { query: query ? { q: query } : undefined });
+      setRows(refreshed.items);
+      setSummary(refreshed.summary ?? { total: refreshed.items.length });
       setUploadState(failed.length ? "error" : "success");
       setUploadMessage(failed.length ? `${failed.length} 个文件上传失败，请查看详情。` : `已提交 ${result.items.length} 个文件，解析任务已排队。`);
       if (inputRef.current) inputRef.current.value = "";
-      setRefreshNonce((current) => current + 1);
     } catch (reason: unknown) {
       setUploadState("error");
       setUploadMessage(reason instanceof Error ? reason.message : "文件上传失败");

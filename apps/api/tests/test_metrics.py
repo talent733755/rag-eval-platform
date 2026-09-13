@@ -39,3 +39,15 @@ def test_metric_contract_keeps_version_and_missing_value_provenance() -> None:
         provenance={"k": str(input_data.k)},
     )
     assert result.missing_reason == "no_relevant_evidence"
+
+
+def test_metric_contract_allows_natural_units_for_engineering_metrics() -> None:
+    result = MetricResult(
+        metric_name="average_latency_ms",
+        version="engineering-v1",
+        value=1250,
+        sample_count=4,
+        provenance={"unit": "milliseconds"},
+    )
+
+    assert result.value == 1250

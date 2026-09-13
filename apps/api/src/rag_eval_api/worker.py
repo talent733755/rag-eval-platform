@@ -282,6 +282,7 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
             batch_size=settings.worker_batch_size,
             heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
         )
+
     def build_adapter(config: AdapterConfig) -> Adapter:
         if config.kind is AdapterKind.python:
             return load_python_adapter(
