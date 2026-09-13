@@ -1,5 +1,6 @@
 """Versioned adapter contracts and implementations."""
 
+from rag_eval_api.adapters.http import HttpAdapter
 from rag_eval_api.adapters.protocol import (
     ADAPTER_CAPABILITY_VERSION,
     Adapter,
@@ -20,4 +21,5 @@ __all__ = [
     "Citation",
     "TraceEnvelope",
     "Usage",
+    "HttpAdapter",
 ]
