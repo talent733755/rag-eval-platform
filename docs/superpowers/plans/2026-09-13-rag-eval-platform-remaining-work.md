@@ -77,8 +77,8 @@
 
 - [ ] **Step 1:** 已覆盖 provider 凭据引用缺失时的安全失败、连接测试不保存问题内容和快照环境 hash；实际 Token 只从进程环境注入，末四位展示留待接入安全凭据存储后实现。
 - [x] **Step 2:** 已实现模型服务项目作用域 CRUD、受限 Transport 能力测试和不可变配置引用；真实模型调用默认关闭，URL 复用安全 Transport。
-- [ ] **Step 3:** 实现实验草稿校验：dataset version 必须 published、Adapter 已测试可用、参数有界、随机种子明确；启动后配置冻结。
-- [ ] **Step 4:** 验证并提交 `feat: 增加模型服务与实验快照`。
+- [x] **Step 3:** 已实现独立实验草稿校验服务：dataset version 必须 published、Adapter 已启用且测试成功、Provider 已启用、参数有界、随机种子明确；返回不可运行的稳定错误码。
+- [ ] **Step 4:** 模型 Provider CRUD/能力测试与快照校验已验证并分阶段提交；安全凭据末四位展示、实验实体化和启动路由仍需后续任务补齐。
 
 ## Task 5：完成可恢复实验执行器
 

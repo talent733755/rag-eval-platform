@@ -18,12 +18,15 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from rag_eval_api.auth.context import RequestActor, get_current_actor
+from rag_eval_api.auth.rbac import ProjectAccess
 from rag_eval_api.candidates.fake import FakeCandidateGenerator
 from rag_eval_api.config import DEFAULT_REDIS_URL, DEFAULT_SECRET_KEY, Settings
 from rag_eval_api.db import get_db_session
 from rag_eval_api.main import create_app
 from rag_eval_api.models import (
     AdapterConfig,
+    AdapterKind,
+    AdapterTestStatus,
     AuditEvent,
     Base,
     CandidateDataset,
@@ -45,11 +48,16 @@ from rag_eval_api.models import (
     Project,
 )
 from rag_eval_api.schemas.candidates import CandidateGenerationRequest
+from rag_eval_api.schemas.experiments import ExperimentDraftRequest
 from rag_eval_api.services.candidate_generation import (
     CandidateGenerationError,
     create_generation_job,
 )
 from rag_eval_api.services.candidate_worker import CandidateWorker
+from rag_eval_api.services.experiment_validation import (
+    ExperimentDraftValidationError,
+    validate_experiment_draft,
+)
 from rag_eval_api.storage.protocol import StoredBlob
 
 EDITOR_ID = UUID("00000000-0000-0000-0000-000000000201")
@@ -1136,3 +1144,93 @@ async def test_model_provider_crud_and_connection_failure_are_tenant_scoped(
         f"/api/projects/{seed.project_id}/model-providers/{provider_id}"
     )
     assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_experiment_draft_requires_published_dataset_and_available_dependencies(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    _, seed, _, session_factory, _ = document_api_environment
+    async with session_factory() as session:
+        dataset = CandidateDataset(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="实验评测集",
+            status=CandidateDatasetStatus.draft,
+        )
+        version = CandidateDatasetVersion(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset=dataset,
+            version_number=1,
+            status=CandidateDatasetStatus.draft,
+            item_count=2,
+            created_by=EDITOR_ID,
+        )
+        adapter = AdapterConfig(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="实验 Adapter",
+            kind=AdapterKind.http,
+            endpoint="https://adapter.example.test",
+            adapter_version="adapter-v1",
+            trace_level="minimal",
+            timeout_seconds=30,
+            retry_count=0,
+            enabled=False,
+            last_test_status=AdapterTestStatus.never,
+        )
+        provider = ModelProviderConfig(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="实验模型",
+            endpoint="https://model.example.test",
+            credential_ref="MODEL_TOKEN",
+            model_name="model-a",
+            timeout_seconds=30,
+            enabled=True,
+        )
+        session.add_all([dataset, version, adapter, provider])
+        await session.commit()
+        project = await session.get(Project, seed.project_id)
+        membership = await session.scalar(
+            select(Membership).where(
+                Membership.project_id == seed.project_id, Membership.user_id == EDITOR_ID
+            )
+        )
+        assert project is not None and membership is not None
+        access = ProjectAccess(
+            project=project,
+            membership=membership,
+            actor=RequestActor(user_id=EDITOR_ID, organization_id=seed.organization_id),
+        )
+        payload = ExperimentDraftRequest(
+            name="首次实验",
+            dataset_version_id=version.id,
+            adapter_config_id=adapter.id,
+            model_provider_id=provider.id,
+            metric_versions={"retrieval": "v1"},
+            random_seed=42,
+        )
+        with pytest.raises(ExperimentDraftValidationError, match="published") as unpublished:
+            await validate_experiment_draft(session, access, payload)
+        assert unpublished.value.code == "dataset_version_unpublished"
+
+        version.status = CandidateDatasetStatus.published
+        await session.flush()
+        with pytest.raises(ExperimentDraftValidationError, match="Adapter") as unavailable:
+            await validate_experiment_draft(session, access, payload)
+        assert unavailable.value.code == "adapter_unavailable"
+
+        adapter.enabled = True
+        adapter.last_test_status = AdapterTestStatus.succeeded
+        validated = await validate_experiment_draft(session, access, payload)
+        assert validated.dataset_item_count == 2
+        assert validated.adapter_version == "adapter-v1"
+        assert validated.random_seed == 42
