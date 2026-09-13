@@ -13,7 +13,11 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("adapter_configs", sa.Column("entrypoint_ref", sa.String(length=255), nullable=True))
+    op.create_unique_constraint(
+        "uq_adapter_configs_tenant", "adapter_configs", ["id", "organization_id", "project_id"]
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("uq_adapter_configs_tenant", "adapter_configs", type_="unique")
     op.drop_column("adapter_configs", "entrypoint_ref")

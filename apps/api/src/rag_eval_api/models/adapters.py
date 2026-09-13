@@ -29,6 +29,7 @@ class AdapterConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "adapter_configs"
     __table_args__ = (
         UniqueConstraint("organization_id", "project_id", "name", name="uq_adapter_configs_name"),
+        UniqueConstraint("id", "organization_id", "project_id", name="uq_adapter_configs_tenant"),
         CheckConstraint("length(trim(name)) > 0", name="adapter_name_nonempty"),
         CheckConstraint(
             "timeout_seconds > 0 AND timeout_seconds <= 300", name="adapter_timeout_range"

@@ -19,6 +19,15 @@ from rag_eval_api.models.documents import (
     DocumentSourceType,
     DocumentVersion,
 )
+from rag_eval_api.models.experiments import (
+    Experiment,
+    ExperimentRun,
+    ExperimentRunAttempt,
+    ExperimentRunItem,
+    ExperimentRunItemStatus,
+    ExperimentRunStatus,
+    ExperimentStatus,
+)
 from rag_eval_api.models.ingestion import (
     IngestionAttemptFinalStatus,
     IngestionJob,
@@ -60,6 +69,13 @@ __all__ = [
     "MembershipRole",
     "ModelProviderConfig",
     "ModelProviderTestStatus",
+    "Experiment",
+    "ExperimentRun",
+    "ExperimentRunAttempt",
+    "ExperimentRunItem",
+    "ExperimentRunItemStatus",
+    "ExperimentRunStatus",
+    "ExperimentStatus",
     "Organization",
     "Project",
     "TimestampMixin",
