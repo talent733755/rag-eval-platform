@@ -20,13 +20,13 @@
 - `apps/api`：FastAPI API、健康检查、项目与成员基础接口、SQLAlchemy/Alembic 数据层和结构化错误响应；
 - `apps/api/src/rag_eval_api/storage`：私有、原子、不可覆盖的 LocalBlobStore；
 - `apps/api/src/rag_eval_api/parsers`：PDF、DOCX、Markdown、UTF-8 文本的有界解析器与 canonical chunk 契约；
-- `apps/web`：Next.js 管理后台、权限感知菜单、项目切换器、文档库和评测集页面；
+- `apps/web`：Next.js 管理后台、权限感知菜单、项目切换器、文档库、评测集、实验、指标和诊断页面；
 - `apps/web/src/lib/api/generated.ts`：由 FastAPI OpenAPI 文档生成的 TypeScript 类型；
 - `docker-compose.yml`：PostgreSQL、Redis、独立 Worker、API 和 Web 的本地容器编排；
 - `.github/workflows/ci.yml`：API/Web 质量门禁、本地集成检查、OpenAPI client diff 校验和 Playwright smoke；
 - `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
 
-当前版本已具备文档导入基础、持久化解析 Worker 运行时、候选评测集版本审核/发布基础和管理后台页面；Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断和真实认证仍按后续公共契约逐步加入。
+当前版本已具备文档导入、候选评测集审核/发布、Adapter/Provider 配置、可恢复实验运行、版本化指标、Trace/失败诊断和回归集基础；真实 OIDC/JWT 认证、成本费率和检索证据评测仍按后续公共契约逐步加入。
 
 当前文档摄取阶段已经完成 BlobStore、解析器基础设施、单文件 HTTP 上传入口，以及
 文档/版本读取、显式版本上传、解析重试和任务查询/取消 API，以及独立持久化 Worker；候选生成

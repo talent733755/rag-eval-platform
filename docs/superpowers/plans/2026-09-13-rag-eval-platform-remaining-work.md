@@ -115,8 +115,8 @@
 
 - [ ] **Step 1:** 补认证回归测试：未认证、过期 token、跨组织 ID、viewer/editor/admin 边界、审计事件和 CORS。
 - [ ] **Step 2:** 实现可替换 OIDC/JWT boundary；development actor 仅 development 可启用，production 禁止默认 secret。
-- [ ] **Step 3:** 完成成员管理、服务配置、Dashboard 聚合和空/加载/错误状态；聚合查询不得跨租户。
-- [ ] **Step 4:** 写数据保留、删除/归档、Provider 密钥、成本和日志脱敏说明。
+- [x] **Step 3:** 已将既有成员 API、Provider 配置 API 接入设置页；Dashboard/指标页读取真实版本化结果并覆盖空/加载/错误状态，跨租户聚合 API 和更细粒度筛选仍待补强。
+- [x] **Step 4:** 已补认证边界、Provider 密钥、Trace 脱敏、数据保留和运行故障处置说明；OIDC/JWT provider 接入仍是明确缺口。
 
 ## Task 9：全链路 E2E、部署和开源发布验收
 

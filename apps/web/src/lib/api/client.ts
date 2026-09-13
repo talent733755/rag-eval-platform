@@ -29,6 +29,10 @@ type TraceResponse = components["schemas"]["TraceResponse"];
 type FailureCaseResponse = components["schemas"]["FailureCaseResponse"];
 type RegressionCaseResponse = components["schemas"]["RegressionCaseResponse"];
 type RegressionCaseCreate = components["schemas"]["RegressionCaseCreate"];
+type MembershipResponse = components["schemas"]["MembershipResponse"];
+type MemberInviteRequest = components["schemas"]["MemberInviteRequest"];
+type MemberInviteResponse = components["schemas"]["MemberInviteResponse"];
+type MemberRoleUpdate = components["schemas"]["MemberRoleUpdate"];
 
 type ErrorEnvelope = {
   error?: {
@@ -100,6 +104,10 @@ export type ApiClient = {
   listFailures(projectId: string, options?: { query?: { run_id?: string; code?: string; limit?: number }; signal?: AbortSignal }): Promise<FailureCaseResponse[]>;
   listRegressionCases(projectId: string, options?: { signal?: AbortSignal }): Promise<RegressionCaseResponse[]>;
   addRegressionCase(projectId: string, payload: RegressionCaseCreate, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<RegressionCaseResponse>;
+  listProjectMembers(projectId: string, options?: { signal?: AbortSignal }): Promise<MembershipResponse[]>;
+  inviteProjectMember(projectId: string, payload: MemberInviteRequest, options?: { signal?: AbortSignal }): Promise<MemberInviteResponse>;
+  updateProjectMember(projectId: string, membershipId: string, payload: MemberRoleUpdate, options?: { signal?: AbortSignal }): Promise<MembershipResponse>;
+  removeProjectMember(projectId: string, membershipId: string, options?: { signal?: AbortSignal }): Promise<void>;
 };
 
 export function createApiClient({
@@ -378,6 +386,30 @@ export function createApiClient({
       return requestJson<RegressionCaseResponse>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/regression-cases`,
         { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json", "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() } }, fetchImpl,
+      );
+    },
+    async listProjectMembers(projectId, options) {
+      return requestJson<MembershipResponse[]>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/members`,
+        { method: "GET", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async inviteProjectMember(projectId, payload, options) {
+      return requestJson<MemberInviteResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/members`,
+        { method: "POST", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
+      );
+    },
+    async updateProjectMember(projectId, membershipId, payload, options) {
+      return requestJson<MembershipResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(membershipId)}`,
+        { method: "PATCH", body: JSON.stringify(payload), signal: options?.signal, headers: { "Content-Type": "application/json" } }, fetchImpl,
+      );
+    },
+    async removeProjectMember(projectId, membershipId, options) {
+      await requestNoContent(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(membershipId)}`,
+        { method: "DELETE", signal: options?.signal }, fetchImpl,
       );
     },
   };
