@@ -133,6 +133,10 @@ class ExperimentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by: Mapped[UUID] = mapped_column(nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    fencing_token: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
 
 
 class ExperimentRunItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):

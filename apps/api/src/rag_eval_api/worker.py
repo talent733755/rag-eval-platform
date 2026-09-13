@@ -18,11 +18,15 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from rag_eval_api.adapters import Adapter, HttpAdapter, load_python_adapter
+from rag_eval_api.adapters.errors import AdapterError
 from rag_eval_api.candidates.provider import OpenAICompatibleCandidateGenerator
 from rag_eval_api.config import Settings, get_settings
 from rag_eval_api.db import create_engine
+from rag_eval_api.models import AdapterConfig, AdapterKind
 from rag_eval_api.parsers.registry import ParserRegistry
 from rag_eval_api.services.candidate_worker import CandidateWorker
+from rag_eval_api.services.experiment_worker import ExperimentWorker
 from rag_eval_api.services.worker import IngestionWorker, WorkerBatchResult
 from rag_eval_api.storage.local import LocalBlobStore
 from rag_eval_api.storage.protocol import BlobStore
@@ -33,9 +37,15 @@ LOGGER = logging.getLogger("rag_eval_api.worker")
 class CombinedWorker:
     """Run parse and candidate jobs behind one runtime polling loop."""
 
-    def __init__(self, ingestion: IngestionWorker, candidates: CandidateWorker | None) -> None:
+    def __init__(
+        self,
+        ingestion: IngestionWorker,
+        candidates: CandidateWorker | None,
+        experiments: ExperimentWorker | None = None,
+    ) -> None:
         self.ingestion = ingestion
         self.candidates = candidates
+        self.experiments = experiments
         self.batch_size = ingestion.batch_size
         self.session_factory = ingestion.session_factory
 
@@ -49,20 +59,34 @@ class CombinedWorker:
         if parse_result.processed:
             return parse_result
         if self.candidates is None:
+            candidate_result = None
+        else:
+            candidate_result = await self.candidates.process_batch(limit)
+        if candidate_result is not None and candidate_result.processed:
+            return WorkerBatchResult(
+                processed=candidate_result.processed,
+                succeeded=candidate_result.succeeded,
+                failed=candidate_result.failed,
+                cancelled=candidate_result.cancelled,
+                lease_lost=candidate_result.lease_lost,
+            )
+        if self.experiments is None:
             return parse_result
-        candidate_result = await self.candidates.process_batch(limit)
+        experiment_result = await self.experiments.process_batch(limit)
         return WorkerBatchResult(
-            processed=candidate_result.processed,
-            succeeded=candidate_result.succeeded,
-            failed=candidate_result.failed,
-            cancelled=candidate_result.cancelled,
-            lease_lost=candidate_result.lease_lost,
+            processed=experiment_result.processed,
+            succeeded=experiment_result.succeeded,
+            failed=experiment_result.failed,
+            cancelled=experiment_result.cancelled,
+            lease_lost=experiment_result.lease_lost,
         )
 
     async def run_maintenance(self) -> None:
         await self.ingestion.run_maintenance()
         if self.candidates is not None:
             await self.candidates.run_maintenance()
+        if self.experiments is not None:
+            await self.experiments.run_maintenance()
 
 
 class ReadinessFile:
@@ -258,7 +282,40 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
             batch_size=settings.worker_batch_size,
             heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
         )
-    combined_worker = CombinedWorker(worker, candidate_worker)
+    def build_adapter(config: AdapterConfig) -> Adapter:
+        if config.kind is AdapterKind.python:
+            return load_python_adapter(
+                config.entrypoint_ref,
+                adapter_version=config.adapter_version,
+                trace_level=config.trace_level,
+                timeout_seconds=config.timeout_seconds,
+            )
+        token = os.getenv(config.credential_ref) if config.credential_ref else None
+        if config.credential_ref and token is None:
+            raise AdapterError(
+                "adapter_credentials_unavailable",
+                "Adapter credential reference is not available.",
+            )
+        if not config.endpoint:
+            raise AdapterError("adapter_unavailable", "Adapter endpoint is unavailable.")
+        return HttpAdapter(
+            config.endpoint,
+            bearer_token=token,
+            adapter_version=config.adapter_version,
+            trace_level=config.trace_level,
+            app_env=settings.app_env,
+            allowed_hosts=settings.provider_allowed_hosts,
+            allowed_ports=settings.provider_allowed_ports,
+            timeout_seconds=config.timeout_seconds,
+        )
+
+    experiment_worker = ExperimentWorker(
+        session_factory=session_factory,
+        adapter_factory=build_adapter,
+        worker_id=f"experiment-worker-{os.getpid()}",
+        lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
+    )
+    combined_worker = CombinedWorker(worker, candidate_worker, experiment_worker)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     runtime = WorkerRuntime(
         worker=combined_worker,
