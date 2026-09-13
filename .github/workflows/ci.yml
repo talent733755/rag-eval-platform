@@ -112,7 +112,7 @@ jobs:
         run: pnpm --dir apps/web build
 
   integration:
-    name: Local API integration
+    name: Local API and Worker integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -140,7 +140,7 @@ jobs:
       - name: Check shell scripts
         run: shellcheck scripts/*.sh scripts/ci/*.sh
 
-      - name: Run PostgreSQL integration gate
+      - name: Run PostgreSQL and Worker integration gate
         run: make test-integration
 
   playwright-smoke:

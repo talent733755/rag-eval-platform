@@ -54,6 +54,35 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "rag_eval_api.worker"]
+    environment:
+      APP_ENV: ${APP_ENV:?APP_ENV must be set in .env}
+      LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL must be set in .env}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      BLOB_ROOT: ${BLOB_ROOT:?BLOB_ROOT must be set in .env}
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?COMPOSE_DATABASE_URL must be set in .env}
+      REDIS_URL: ${COMPOSE_REDIS_URL:?COMPOSE_REDIS_URL must be set in .env}
+      WORKER_READINESS_FILE: /run/rag-eval/worker-ready
+    volumes:
+      - blob_data:/var/lib/rag-eval/blobs
+      - worker_ready:/run/rag-eval
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /run/rag-eval/worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
   web:
     build:
       context: .
@@ -71,3 +100,4 @@ volumes:
   postgres_data:
   redis_data:
   blob_data:
+  worker_ready:

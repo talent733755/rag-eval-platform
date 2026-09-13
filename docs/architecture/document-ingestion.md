@@ -5,19 +5,17 @@
 Document ingestion is an asynchronous, tenant-scoped pipeline for turning
 user-owned document bytes into traceable parsed chunks and reviewable candidate
 data. PostgreSQL is the source of truth for state, provenance, idempotency, and
-leases. Redis may later provide wake-up hints; it must never be used as the
-durable queue.
+leases. Redis provides optional wake-up hints; it is never the durable queue.
 
 ## Current phase boundary
 
 This phase provides the public contract, safe runtime configuration, SQLAlchemy
 models, the `0002_document_ingestion`/`0003_ingestion_contract_hardening`
 migrations, pure job-domain rules, a private local BlobStore, bounded format
-parsers, and the first persistent parse-worker service. It deliberately does
-not implement:
+parsers, and the persistent parse-worker service plus standalone runtime. It
+deliberately does not implement:
 
 - HTTP routes or multipart handling;
-- an independently runnable worker process or Compose worker service;
 - object-storage adapters;
 - provider calls or fabricated parse/candidate results.
 
@@ -67,7 +65,7 @@ is classified using the stable error taxonomy in the v1 contract. The parser
 modules do not perform network I/O; production deployments must add a
 non-privileged OS/container sandbox for hostile files.
 
-`ParserRunner` is the security boundary that the next worker phase must use for
+`ParserRunner` is the security boundary that the worker runtime uses for
 PDF/DOCX jobs. It runs a disposable subprocess and terminates its process group
 on a hard timeout. Development may use a restricted fallback with Python-level
 socket denial, but that is not OS network isolation. Production and
@@ -93,13 +91,13 @@ The parent/child protocol is strict UTF-8 JSON, never
 pickle or another executable object format. Timeout, malformed output, EOF, and
 crash outcomes retain the public `parse_timeout` and
 `parser_sandbox_unavailable` error codes. The parser runner is not itself a
-worker process. `IngestionWorker` now provides the transactional one-job
+worker process. `IngestionWorker` provides the transactional one-job
 execution boundary: it claims queued parse jobs with a PostgreSQL row lock,
 creates a lease, parses through the BlobStore, persists immutable chunks,
-finalizes an append-only attempt, and writes a worker audit event. Expired
-leases are requeued with an incremented fencing token. A standalone polling
-process, heartbeat loop, and Compose readiness wrapper remain to be added
-around this service.
+finalizes an append-only attempt, and writes a worker audit event. Its runtime
+adds bounded batches, lease heartbeats, graceful cancellation, maintenance,
+Redis wake-up hints, readiness ownership, and expired-lease recovery. PostgreSQL
+polling remains sufficient when Redis is unavailable.
 
 The child output budget is explicit `MAX_PARSER_OUTPUT_BYTES` configuration
 (64 MiB by default, with a 1 MiB–256 MiB bound) and is reserved for serialized

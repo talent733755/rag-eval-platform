@@ -16,6 +16,7 @@ compose_env_file=""
 compose_project_name=""
 compose_files=("${repo_root}/docker-compose.yml")
 compose_profiles=()
+include_worker=false
 while (($# > 0)); do
   case "$1" in
     --compose-env-file)
@@ -37,6 +38,10 @@ while (($# > 0)); do
       [[ $# -ge 2 ]] || { printf '%s\n' '--profile requires a value' >&2; exit 2; }
       compose_profiles+=("$2")
       shift 2
+      ;;
+    --include-worker)
+      include_worker=true
+      shift
       ;;
     *)
       printf 'unknown option: %s\n' "$1" >&2
@@ -64,6 +69,7 @@ readonly start_ms="$(clock_ms)"
 readonly deadline_ms=$((start_ms + 30000))
 postgres_ready=false
 redis_ready=false
+worker_ready=false
 
 before_deadline() {
   (( $(clock_ms) < deadline_ms - cleanup_reserve_ms ))
@@ -139,6 +145,18 @@ redis_is_ready() {
   run_probe redis_probe
 }
 
+worker_probe() {
+  exec "${compose_command[@]}" "${compose_args[@]}" exec -T worker sh -ec \
+    'test -f "${WORKER_READINESS_FILE:-/run/rag-eval/worker-ready}" && \
+     python3 -c '"'"'import os,sys,time; p=sys.argv[1]; age=time.time()-os.stat(p).st_mtime; raise SystemExit(0 if 0 <= age <= 120 else 1)'"'"' \
+     "${WORKER_READINESS_FILE:-/run/rag-eval/worker-ready}"' \
+    >/dev/null 2>&1
+}
+
+worker_is_ready() {
+  run_probe worker_probe
+}
+
 while before_deadline; do
   if [[ "$postgres_ready" != true ]] && postgres_is_ready; then
     postgres_ready=true
@@ -148,7 +166,12 @@ while before_deadline; do
     redis_ready=true
   fi
 
-  if [[ "$postgres_ready" == true && "$redis_ready" == true ]]; then
+  if [[ "$include_worker" == true && "$worker_ready" != true ]] && worker_is_ready; then
+    worker_ready=true
+  fi
+
+  if [[ "$postgres_ready" == true && "$redis_ready" == true && \
+    ("$include_worker" != true || "$worker_ready" == true) ]]; then
     exit 0
   fi
 
@@ -160,6 +183,7 @@ done
 unavailable=()
 [[ "$postgres_ready" == true ]] || unavailable+=(postgres)
 [[ "$redis_ready" == true ]] || unavailable+=(redis)
+[[ "$include_worker" != true || "$worker_ready" == true ]] || unavailable+=(worker)
 
 printf 'Unavailable service(s) after 30 seconds: %s\n' "${unavailable[*]}" >&2
 exit 1

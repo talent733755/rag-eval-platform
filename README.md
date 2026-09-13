@@ -22,14 +22,14 @@
 - `apps/api/src/rag_eval_api/parsers`：PDF、DOCX、Markdown、UTF-8 文本的有界解析器与 canonical chunk 契约；
 - `apps/web`：Next.js 管理后台壳层、权限感知菜单、项目切换器和占位业务页面；
 - `apps/web/src/lib/api/generated.ts`：由 FastAPI OpenAPI 文档生成的 TypeScript 类型；
-- `docker-compose.yml`：PostgreSQL、Redis、API 和 Web 的本地容器编排；
+- `docker-compose.yml`：PostgreSQL、Redis、独立 Worker、API 和 Web 的本地容器编排；
 - `.github/workflows/ci.yml`：API/Web 质量门禁、本地集成检查、OpenAPI client diff 校验和 Playwright smoke；
 - `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
 
-当前版本仍然是基础平台闭环，文档导入与评测集工厂、Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断、真实认证和异步任务编排尚未实现；这些边界会在后续迭代中按公共契约逐步加入。
+当前版本已具备文档导入基础、持久化解析 Worker 运行时和管理后台壳；候选评测集工厂、Pipeline Adapter 执行、实验任务、指标计算、Trace/失败诊断和真实认证仍按后续公共契约逐步加入。
 
 当前文档摄取阶段已经完成 BlobStore、解析器基础设施、单文件 HTTP 上传入口，以及
-文档/版本读取、显式版本上传、解析重试和任务查询/取消 API；持久化 worker、候选生成
+文档/版本读取、显式版本上传、解析重试和任务查询/取消 API，以及独立持久化 Worker；候选生成
 和 Documents 管理页面仍在后续切片中。直接调用解析器的最小本地示例（不会联网，也
 不会调用模型）如下：
 
@@ -63,7 +63,7 @@ cp .env.example .env
 make infra-up
 ```
 
-`make infra-up` 只启动 PostgreSQL 和 Redis。API 和 Web 开发服务分别在两个终端启动。
+`make infra-up` 只启动 PostgreSQL 和 Redis。API、Worker 和 Web 开发服务分别启动；也可以直接使用下面的 Compose 命令启动完整服务。
 
 终端 1：启动 API（仅绑定本机回环地址）：
 
@@ -77,10 +77,16 @@ uv run --directory apps/api uvicorn rag_eval_api.main:app --reload --host 127.0.
 corepack pnpm --dir apps/web dev
 ```
 
+终端 3：启动独立 Worker（API 进程不会隐式启动 Worker）：
+
+```bash
+uv run --directory apps/api python -m rag_eval_api.worker
+```
+
 API 的本机开发命令默认不会暴露到局域网。Compose、反向代理或公网部署应使用各自的
 网络、端口映射和 TLS/访问控制配置，不要把本机开发命令直接当作公网启动方案。
 
-也可以在完成 `.env` 配置后使用 `docker compose up -d` 启动 Compose 中定义的全部服务。
+也可以在完成 `.env` 配置后使用 `docker compose up -d --build` 启动 Compose 中定义的全部服务。Worker 使用 PostgreSQL 轮询任务，Redis 只负责唤醒提示；可用 `docker compose ps` 查看 Worker healthcheck。
 
 Web 壳层通过 `GET /api/projects` 加载当前 actor 可见的项目。可用
 `NEXT_PUBLIC_API_BASE_URL` 指向 API 地址；未设置时默认为
@@ -103,7 +109,7 @@ make build
 ```
 
 `make test-integration` 会创建临时 Compose 环境，自动启动并等待隔离的
-PostgreSQL/Redis，执行 Alembic `upgrade`/`check` 和 PostgreSQL integration tests，最后清理容器、网络和临时配置。Docker Compose 不可用时会明确以非零状态失败，不会静默跳过；该目标不会修改仓库中的 `.env`。
+PostgreSQL/Redis/Worker，执行 Alembic `upgrade`/`check`、Worker readiness 检查和 PostgreSQL integration tests，最后清理容器、网络和临时配置。Docker Compose 不可用时会明确以非零状态失败，不会静默跳过；该目标不会修改仓库中的 `.env`。
 
 ### API 客户端与浏览器冒烟
 

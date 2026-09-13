@@ -17,6 +17,10 @@ compose_project="rag-eval-integration-$run_id"
 cleanup() {
   local status=$?
   set +e
+  if ((status != 0)) && ((${#compose[@]} > 0)); then
+    printf '%s\n' 'Integration Compose logs:' >&2
+    "${compose[@]}" logs --no-color postgres redis worker >&2 || true
+  fi
   if [[ -f "$test_env_file" ]]; then
     if ! bash "$repo_root/scripts/ci/drop-test-database.sh" \
       "$test_env_file" "$compose_env_file" "$compose_project"; then
@@ -69,5 +73,9 @@ export DATABASE_URL REDIS_URL=redis://127.0.0.1:6379/0 TEST_DATABASE_URL="$DATAB
 uv lock --directory "$repo_root/apps/api" --check
 uv sync --directory "$repo_root/apps/api" --locked
 uv run --directory "$repo_root/apps/api" alembic upgrade head
+"${compose[@]}" up -d --build worker
+bash "$repo_root/scripts/wait-for-services.sh" --compose-env-file "$compose_env_file" \
+  --project-name "$compose_project" --compose-file "$repo_root/docker-compose.integration.yml" \
+  --profile integration --include-worker
 uv run --directory "$repo_root/apps/api" alembic check
 uv run --directory "$repo_root/apps/api" pytest -m integration -q
