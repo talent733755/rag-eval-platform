@@ -52,4 +52,35 @@ describe("API client", () => {
       message: "拒绝访问",
     });
   });
+
+  it("lists project documents with encoded filters", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], next_cursor: null, summary: { total: 0 } }), { status: 200 }),
+    );
+    const client = createApiClient({ baseUrl: "https://api.example.test", fetchImpl });
+
+    await client.listDocuments("project/one", { query: { q: "合同 草案", parse_status: "failed" } });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.test/api/projects/project%2Fone/documents?q=%E5%90%88%E5%90%8C+%E8%8D%89%E6%A1%88&parse_status=failed",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("uploads a bounded multipart batch with an idempotency key", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), { status: 207 }),
+    );
+    const client = createApiClient({ baseUrl: "https://api.example.test", fetchImpl });
+    const file = new File(["内容"], "说明.md", { type: "text/markdown" });
+
+    await client.uploadDocuments("project-id", [file], { idempotencyKey: "batch-key" });
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.example.test/api/projects/project-id/documents/batch-upload");
+    expect(init).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(init?.headers).toEqual(expect.objectContaining({ "Idempotency-Key": "batch-key" }));
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect(Array.from((init?.body as FormData).getAll("files"))).toHaveLength(1);
+  });
 });

@@ -4,6 +4,8 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
 type ProjectListResponse =
   operations["list_projects_api_projects_get"]["responses"][200]["content"]["application/json"];
+type DocumentListResponse = components["schemas"]["DocumentListResponse"];
+type BatchUploadResponse = components["schemas"]["DocumentBatchUploadResponse"];
 
 type ErrorEnvelope = {
   error?: {
@@ -27,6 +29,18 @@ export class ApiError extends Error {
 
 export type ApiClient = {
   listProjects(options?: { signal?: AbortSignal }): Promise<ProjectListResponse>;
+  listDocuments(
+    projectId: string,
+    options?: {
+      query?: { q?: string; source_type?: string; parse_status?: string; cursor?: string };
+      signal?: AbortSignal;
+    },
+  ): Promise<DocumentListResponse>;
+  uploadDocuments(
+    projectId: string,
+    files: File[],
+    options?: { signal?: AbortSignal; idempotencyKey?: string },
+  ): Promise<BatchUploadResponse>;
 };
 
 export function createApiClient({
@@ -46,7 +60,41 @@ export function createApiClient({
         fetchImpl,
       );
     },
-  };
+    async listDocuments(projectId, options) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(options?.query ?? {})) {
+        if (value) query.set(key, value);
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return requestJson<DocumentListResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents${suffix}`,
+        { method: "GET", signal: options?.signal },
+        fetchImpl,
+      );
+    },
+    async uploadDocuments(projectId, files, options) {
+      const formData = new FormData();
+      for (const file of files) formData.append("files", file, file.name);
+      return requestJson<BatchUploadResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/batch-upload`,
+        {
+          method: "POST",
+          body: formData,
+          signal: options?.signal,
+          headers: { "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey() },
+        },
+        fetchImpl,
+      );
+    },
+};
+}
+
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 export type ProjectResponse = components["schemas"]["ProjectResponse"];
