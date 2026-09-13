@@ -117,7 +117,7 @@ async def test_postgres_migration_head_and_ingestion_tables(
     postgres_connection: AsyncConnection,
 ) -> None:
     revision = await postgres_connection.scalar(text("SELECT version_num FROM alembic_version"))
-    assert revision == "0003_ingestion_hardening"
+    assert revision == "0015_schema_alignment"
     result = await postgres_connection.execute(
         text(
             "SELECT count(*) FROM information_schema.tables "

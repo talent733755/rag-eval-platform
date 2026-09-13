@@ -5,6 +5,7 @@ import hashlib
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -109,6 +110,7 @@ async def postgres_worker_environment(
                 document_version=version,
                 idempotency_key=f"worker-integration-{index}",
                 request_fingerprint=f"worker-fingerprint-{index}",
+                created_at=datetime(2000, 1, 1, tzinfo=UTC) + timedelta(seconds=index),
             )
             session.add_all([document, version, job])
             await session.flush()

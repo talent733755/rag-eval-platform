@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from rag_eval_api.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -15,6 +16,23 @@ from rag_eval_api.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class AdapterKind(str, Enum):
     http = "http"
     python = "python"
+
+
+class AdapterKindStorage(TypeDecorator[AdapterKind]):
+    """Store adapter kinds as the legacy VARCHAR contract while returning enums."""
+
+    impl = String(7)
+    cache_ok = True
+
+    def process_bind_param(self, value: AdapterKind | str | None, dialect: object) -> str | None:
+        del dialect
+        if value is None:
+            return None
+        return value.value if isinstance(value, AdapterKind) else value
+
+    def process_result_value(self, value: str | None, dialect: object) -> AdapterKind | None:
+        del dialect
+        return AdapterKind(value) if value is not None else None
 
 
 class AdapterTestStatus(str, Enum):
@@ -45,19 +63,18 @@ class AdapterConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    kind: Mapped[AdapterKind] = mapped_column(
-        SqlEnum(AdapterKind, name="adapter_kind", native_enum=False, create_constraint=True),
-        nullable=False,
-    )
+    kind: Mapped[AdapterKind] = mapped_column(AdapterKindStorage(), nullable=False)
     endpoint: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     credential_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entrypoint_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     token_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     adapter_version: Mapped[str] = mapped_column(String(100), nullable=False)
     trace_level: Mapped[str] = mapped_column(String(20), nullable=False, default="minimal")
-    timeout_seconds: Mapped[float] = mapped_column(nullable=False, default=30)
-    retry_count: Mapped[int] = mapped_column(nullable=False, default=0)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    timeout_seconds: Mapped[float] = mapped_column(nullable=False, default=30, server_default="30")
+    retry_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     last_test_status: Mapped[AdapterTestStatus] = mapped_column(
         SqlEnum(
             AdapterTestStatus,
@@ -67,4 +84,5 @@ class AdapterConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         nullable=False,
         default=AdapterTestStatus.never,
+        server_default="never",
     )

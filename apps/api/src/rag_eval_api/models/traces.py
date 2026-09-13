@@ -66,7 +66,9 @@ class PersistedTrace(UUIDPrimaryKeyMixin, Base):
     level: Mapped[str] = mapped_column(String(20), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     stages: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 class FailureCase(UUIDPrimaryKeyMixin, Base):
@@ -115,7 +117,9 @@ class FailureCase(UUIDPrimaryKeyMixin, Base):
     safe_message: Mapped[str] = mapped_column(String(500), nullable=False)
     trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 def _reject_mutation(mapper: object, connection: object, target: object) -> None:

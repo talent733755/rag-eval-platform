@@ -32,8 +32,9 @@ make build
 make test-integration
 ```
 
-该命令使用隔离的 Compose 项目和临时测试数据库，失败时应保留错误码与服务状态，但不得
-上传密钥、完整文档或原始 Provider 响应。
+该命令使用隔离的 Compose 项目和临时测试数据库，基础镜像来自 pinned digest 的 Amazon
+ECR Public 官方镜像源。失败时应保留错误码与服务状态，但不得上传密钥、完整文档或
+原始 Provider 响应。
 
 ## 3. 契约与浏览器检查
 

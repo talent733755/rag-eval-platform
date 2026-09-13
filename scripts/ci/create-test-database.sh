@@ -40,14 +40,21 @@ postgres_password="$(env_value POSTGRES_PASSWORD)"
 	exit 2
 }
 
+postgres_host_port="$("${compose[@]}" port postgres 5432 | awk -F: 'NF { print $NF; exit }')"
+[[ "$postgres_host_port" =~ ^[0-9]+$ ]] || {
+	printf 'Compose did not expose a valid PostgreSQL host port\n' >&2
+	exit 2
+}
+
 "${compose[@]}" exec -T postgres sh -ec \
 	'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -c \
 	"CREATE DATABASE \"$1\";"' sh "$database_name" >/dev/null
 
-database_url="postgresql+asyncpg://$postgres_user:$postgres_password@127.0.0.1:5432/$database_name"
+database_url="postgresql+asyncpg://$postgres_user:$postgres_password@127.0.0.1:$postgres_host_port/$database_name"
 umask 077
 {
 	printf 'DATABASE_URL=%s\n' "$database_url"
 	printf 'TEST_DATABASE_NAME=%s\n' "$database_name"
 	printf 'TEST_DATABASE_HOST=127.0.0.1\n'
+	printf 'TEST_DATABASE_PORT=%s\n' "$postgres_host_port"
 } >"$test_env_file"

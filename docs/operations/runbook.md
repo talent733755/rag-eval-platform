@@ -26,4 +26,5 @@ payload 先脱敏，64 KiB 以内才内联，较大内容使用私有 BlobStore 
 和 regression history；这些表由应用和 PostgreSQL append-only 边界共同保护。
 
 当前已知限制：认证 provider 尚未接入；成本指标尚无费率契约；检索指标等待 Adapter 检索
-证据接入；Compose 集成测试可能受 Docker Hub 基础镜像拉取权限影响。
+证据接入。API/Worker/Web 使用 pinned digest 的 Amazon ECR Public 官方镜像源；如所在
+网络无法访问 `public.ecr.aws`，需为 Docker 配置可访问的等价镜像代理，并保持相同内容 digest。

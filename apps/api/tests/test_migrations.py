@@ -129,3 +129,30 @@ def test_regression_case_migration_preserves_lineage_and_idempotency(
     assert "uq_regression_cases_idempotency" in upgrade_sql
     assert "CREATE TRIGGER regression_cases_append_only" in upgrade_sql
     assert "DROP TABLE regression_cases" in downgrade_sql
+
+
+def test_schema_alignment_migration_covers_model_indexes_and_tenant_foreign_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    upgrade_sql = _offline_migration_sql("head")
+    downgrade_sql = _offline_migration_sql("head:0014_regression_cases", downgrade=True)
+
+    for index_name in (
+        "ix_experiments_dataset_version_id",
+        "ix_experiments_adapter_config_id",
+        "ix_experiments_model_provider_id",
+        "ix_experiment_runs_experiment_id",
+        "ix_experiment_run_items_run_id",
+        "ix_experiment_run_items_candidate_item_id",
+        "ix_experiment_run_attempts_run_item_id",
+        "ix_metric_results_run_item_id",
+        "ix_metric_results_metric_definition_id",
+        "ix_traces_run_item_id",
+        "ix_failure_cases_run_item_id",
+    ):
+        assert index_name in upgrade_sql
+        assert index_name in downgrade_sql
+
+    assert "fk_experiment_run_attempts_organization_id_organizations" in upgrade_sql
+    assert "fk_experiment_run_attempts_organization_id_organizations" in downgrade_sql

@@ -106,45 +106,41 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
   通过 BlobStore/ParserRegistry 解析，并在一个完成事务中写入 immutable chunks、attempt history 和 audit；
 - 解析失败按稳定错误码落为 failed，成功结果更新版本统计；过期 lease 可安全将 processing job 重排队，
   下一次领取会递增 attempt/fencing token；
-- 当前仍缺独立 worker 进程入口、心跳循环、Redis 唤醒和 Compose readiness。
+- 独立 worker 进程入口、心跳循环、Redis 唤醒和 Compose readiness 已接入并通过集成验证。
 
 ## 3. 最近验证结果
 
 截至当前切片已执行：
 
-- API 非集成：`182 passed, 2 skipped, 5 deselected`；
+- API 非集成：`249 passed, 2 skipped, 6 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
-- Web：`54 passed`；
+- Web：`66 passed`；
 - 根目录 `make lint`、`make typecheck`、`make test`、`make build` 全部通过；
 - `uv lock --directory apps/api --check` 和 Shell 语法检查通过；
 - Web lint、typecheck、build：通过；
 - API Ruff check/format、mypy、`uv lock --check`、Shell 语法：通过；
 - macOS 没有 bubblewrap，所以真实 bwrap 测试按条件跳过；Linux CI 会执行；
-- 真实 PostgreSQL 集成测试：`5 passed, 181 deselected`，包含真实 LocalBlobStore 的并发版本上传闭环；
+- 真实 PostgreSQL/Redis/Worker 集成测试：`6 passed, 251 deselected`，包含迁移头、真实 LocalBlobStore
+  并发版本上传、Worker 并发解析闭环和 readiness；
 
 当前文档摄取基础、候选生成、实验、指标、Trace/失败回归和设置页已完成对应 MVP 切片；本分支
 仍未合并回 `main`，但最新提交已推送远程。
 
 ## 4. 尚未完成且必须先处理的阻断项
 
-上传 API、读取/任务 API、显式版本上传、孤儿 Blob 对账基础与解析 worker 核心已经形成文档摄取
-HTTP/存储/执行基础闭环，但仍不能视为完整文档摄取垂直闭环；后续还需补充 worker 进程入口和
-Documents UI。
-保留的质量缺口如下：
+文档摄取 HTTP/存储/执行基础闭环已完成。保留的产品与发布质量缺口如下：
 
-1. **运行时入口** 尚未提供独立 worker 进程、心跳循环、Redis 唤醒和 Compose readiness；HTTP 事务
-   清理仍不能单独覆盖进程崩溃。
-2. **测试缺口**：跨组织、并发唯一冲突与 worker 端到端 PostgreSQL 覆盖仍需扩充；SQLite
-   不能替代 PostgreSQL 约束/并发集成测试。
+1. **认证**：真实 OIDC/JWT provider 尚未接入，development actor 不能替代生产认证。
+2. **产品契约**：成本费率、检索证据指标和完整全链路 E2E/Playwright 仍需补齐。
 
-下一步建议：先修复 Docker Hub pinned Python 基础镜像的 403，完成 Worker 镜像构建、readiness、
-PostgreSQL integration 和 Playwright；随后处理真实 OIDC/JWT、有限重试/取消中断、成本费率和
-检索证据契约等产品缺口。
+本轮已解决 Docker Hub pinned Python 镜像返回 `403 Forbidden` 的构建阻断：API/Web/Worker 改用
+内容 digest 相同的 Amazon ECR Public 官方镜像源；若网络无法访问 `public.ecr.aws`，应配置等价
+镜像代理并保持相同 digest。
 
 ## 5. 下一阶段路线
 
-修复上述上传 API 阻断项后，按实施计划继续：
+后续按实施计划继续：
 
 1. 将 Blob 对账接入 worker 维护入口，补齐 worker 进程、心跳/批量循环和 Compose readiness。
 2. 实现持久化 `JobRepository`：PostgreSQL `FOR UPDATE SKIP LOCKED`、lease/heartbeat、
@@ -180,13 +176,13 @@ uv run --directory apps/api pytest -m 'not integration' -q
 make lint typecheck test build
 ```
 
-本轮最新验证：根目录 `make lint`、`make typecheck`、`make test`、`make build` 全部通过；API
-`246 passed, 2 skipped, 6 deselected`，Web `66 passed`。官方 npm audit（使用
+本轮最新验证：根目录 `make lint`、`make typecheck`、`make test`、`make build`、`make test-integration`
+全部通过；API `249 passed, 2 skipped, 6 deselected`，Web `66 passed`。官方 npm audit（使用
 `https://registry.npmjs.org`）和 Python `pip-audit --skip-editable --strict --local` 均无已知漏洞。
-`make test-integration` 已在隔离 Compose 中完成 PostgreSQL/Redis 启动和 Alembic `0014` 空库迁移，
-但 Worker 构建因 `python:3.12-slim-bookworm@sha256:782412...` 从 Docker Hub 返回 `403 Forbidden`
-而停止；Worker readiness、API integration 和 Playwright 尚未执行。此前修复的迁移回归包括 `0005`
-check constraint 字面命名和 `0012/0013/0014` asyncpg 多语句执行问题。
+`make test-integration` 已在隔离 Compose 中完成 PostgreSQL/Redis/Worker 启动、Alembic `0015` 空库
+迁移、`alembic check` 和 API integration；Playwright 尚未在本机执行。此前修复的迁移回归包括
+`0005` check constraint 字面命名、`0012/0013/0014` asyncpg 多语句执行问题，以及 `0015` 对齐
+历史索引/租户外键与 ORM 元数据。
 
 继续修复代码时遵循 TDD：先新增能准确表达问题的失败测试，确认红灯，再写最小实现，最后跑相关
 测试、全量门禁和独立评审。不要把 `.docker/`、`.env`、构建产物或测试数据提交到仓库。

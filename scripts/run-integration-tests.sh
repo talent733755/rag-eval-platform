@@ -21,6 +21,9 @@ cleanup() {
     printf '%s\n' 'Integration Compose logs:' >&2
     "${compose[@]}" logs --no-color postgres redis worker >&2 || true
   fi
+  if ((${#compose[@]} > 0)); then
+    "${compose[@]}" stop worker >/dev/null 2>&1 || true
+  fi
   if [[ -f "$test_env_file" ]]; then
     if ! bash "$repo_root/scripts/ci/drop-test-database.sh" \
       "$test_env_file" "$compose_env_file" "$compose_project"; then
@@ -59,17 +62,36 @@ EOF
 compose=(env -i "PATH=$PATH" COMPOSE_DISABLE_ENV_FILE=1 docker compose --project-directory "$repo_root" --file "$repo_root/docker-compose.yml"
   --file "$repo_root/docker-compose.integration.yml" --env-file "$compose_env_file"
   --profile integration --project-name "$compose_project")
+compose_env_value() {
+  awk -F= -v key="$1" '$1 == key { value = substr($0, index($0, "=") + 1) } END { print value }' "$compose_env_file"
+}
+postgres_user="$(compose_env_value POSTGRES_USER)"
+postgres_password="$(compose_env_value POSTGRES_PASSWORD)"
+[[ -n "$postgres_user" && -n "$postgres_password" ]] || {
+  printf '%s\n' 'Compose environment must define PostgreSQL credentials' >&2
+  exit 2
+}
 "${compose[@]}" config >/dev/null
 "${compose[@]}" up -d postgres redis
 bash "$repo_root/scripts/wait-for-services.sh" --compose-env-file "$compose_env_file" \
   --project-name "$compose_project" --compose-file "$repo_root/docker-compose.integration.yml" \
   --profile integration
+redis_host_port="$("${compose[@]}" port redis 6379 | awk -F: 'NF { print $NF; exit }')"
+[[ "$redis_host_port" =~ ^[0-9]+$ ]] || {
+  printf '%s\n' 'Compose did not expose a valid Redis host port' >&2
+  exit 2
+}
 bash "$repo_root/scripts/ci/create-test-database.sh" "$test_env_file" "$compose_env_file"
 # shellcheck disable=SC1090
 source "$test_env_file"
+compose_database_url="postgresql+asyncpg://$postgres_user:$postgres_password@postgres:5432/$TEST_DATABASE_NAME"
+updated_compose_env_file="$runtime_dir/compose.test.env"
+awk -F= '$1 != "COMPOSE_DATABASE_URL" { print }' "$compose_env_file" >"$updated_compose_env_file"
+printf 'COMPOSE_DATABASE_URL=%s\n' "$compose_database_url" >>"$updated_compose_env_file"
+mv -- "$updated_compose_env_file" "$compose_env_file"
 export APP_ENV=development DEV_ACTOR_ID=00000000-0000-4000-8000-000000000001
 export SECRET_KEY=integration-test-secret BLOB_ROOT=/var/lib/rag-eval/blobs
-export DATABASE_URL REDIS_URL=redis://127.0.0.1:6379/0 TEST_DATABASE_URL="$DATABASE_URL"
+export DATABASE_URL REDIS_URL="redis://127.0.0.1:$redis_host_port/0" TEST_DATABASE_URL="$DATABASE_URL"
 uv lock --directory "$repo_root/apps/api" --check
 uv sync --directory "$repo_root/apps/api" --locked
 uv run --directory "$repo_root/apps/api" alembic upgrade head

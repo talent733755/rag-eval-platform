@@ -51,6 +51,11 @@ class CandidateDatasetVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="fk_candidate_dataset_versions_dataset_tenant",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["project_id", "organization_id"],
+            ["projects.id", "projects.organization_id"],
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "dataset_id", "version_number", name="uq_candidate_dataset_versions_number"
         ),

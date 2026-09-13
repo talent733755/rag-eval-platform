@@ -44,10 +44,13 @@ class ModelProviderConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     endpoint: Mapped[str] = mapped_column(String(2048), nullable=False)
     credential_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     model_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    timeout_seconds: Mapped[float] = mapped_column(nullable=False, default=30)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    timeout_seconds: Mapped[float] = mapped_column(nullable=False, default=30, server_default="30")
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     last_test_status: Mapped[ModelProviderTestStatus] = mapped_column(
         SqlEnum(ModelProviderTestStatus, name="model_provider_test_status", native_enum=False),
         nullable=False,
         default=ModelProviderTestStatus.never,
+        server_default="never",
     )

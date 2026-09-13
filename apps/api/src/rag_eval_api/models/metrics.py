@@ -66,7 +66,9 @@ class MetricDefinition(UUIDPrimaryKeyMixin, Base):
     stage: Mapped[str] = mapped_column(String(50), nullable=False)
     definition: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_by: Mapped[UUID] = mapped_column(nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 class MetricResult(UUIDPrimaryKeyMixin, Base):
@@ -143,7 +145,9 @@ class MetricResult(UUIDPrimaryKeyMixin, Base):
     dimensions: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     distribution: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     provenance: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 @event.listens_for(MetricDefinition, "before_update")

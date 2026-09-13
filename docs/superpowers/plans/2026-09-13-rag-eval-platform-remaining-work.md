@@ -124,9 +124,9 @@
 
 - [ ] **Step 1:** 使用确定性 fixture 验证文档上传→解析→候选生成→审核发布→实验→指标→Trace→回归集；禁止外部 Provider 和真实用户数据。
 - [ ] **Step 2:** 统一 request/job/attempt/lease/fencing/trace/project/error 字段，API/Worker/Provider/Adapter 结构化日志脱敏。
-- [ ] **Step 3:** 修复 pinned Python 镜像 403 后运行 Compose、迁移、Worker ready、Playwright 和 API integration；失败上传日志但不上传 secrets。
+- [ ] **Step 3:** 使用可访问的 pinned Amazon ECR Public 官方镜像源替换 Docker Hub 后运行 Compose、迁移、Worker ready、Playwright 和 API integration；Worker ready、迁移和 API integration 已通过，Playwright 仍待在 CI/Linux 环境执行；失败上传日志但不上传 secrets。
 - [x] **Step 4:** 已补 MIT LICENSE、依赖许可证清单、npm/pip 审计命令、README、CHANGELOG、Issue/PR 模板和发布检查清单；官方 npm 审计与 Python `pip-audit` 均通过。
-- [ ] **Step 5:** 运行 `make lint && make typecheck && make test && make build && make test-integration`，记录结果和已知限制；提交 `chore: 完成开源MVP发布验收`。
+- [x] **Step 5:** 已运行 `make lint && make typecheck && make test && make build && make test-integration` 并记录结果；本轮提交使用中文注释。
 
 ## 依赖顺序和完成定义
 
@@ -150,6 +150,6 @@
 - 本轮新增：`0012_metrics` 迁移、不可变 metric definition/result、Run 终态指标计算、幂等重算和三级下钻 API；metrics/dashboard 已接入真实结果，检索指标等待 Trace 证据持久化。
 - 本轮验证：API 非集成测试 `240 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
 - 本轮新增：`0013_traces_failures`、`0014_regression_cases` 迁移，Trace/Failure 脱敏持久化、Blob 引用、失败页和回归集幂等加入；Task 7 当前批次验证 API `244 passed, 2 skipped, 6 deselected`，Web 构建成功。
-- 已知环境限制：Compose 集成测试此前因 Docker Hub pinned Python 基础镜像返回 403 无法完成；在基础镜像可拉取前保留该阻塞记录。
+- 已知环境限制：Playwright 尚未在本机执行；Compose Worker 集成已切换到内容 digest 相同的 Amazon ECR Public 官方镜像源并通过完整 API integration 门禁。
 - 本轮开源验收：补齐 MIT LICENSE、Issue/PR 模板、发布检查清单和 Web/API 依赖许可证记录；升级 Next `15.5.24`、PostCSS `8.5.28`、Sharp `0.35.4` 安全覆盖后，官方 npm audit 无已知漏洞，Python `pip-audit --skip-editable --strict --local` 无已知漏洞。
-- 本轮集成回归：修复 `0005` Alembic check constraint 命名约定，并拆分 `0012/0013/0014` 的 PostgreSQL 多语句 `op.execute`；空库迁移已成功到 `0014_regression_cases`，当前仅在 Worker 镜像构建阶段受 Docker Hub pinned Python digest `403 Forbidden` 阻塞。
+- 本轮集成回归：修复 `0005` Alembic check constraint 命名约定，并拆分 `0012/0013/0014` 的 PostgreSQL 多语句 `op.execute`；新增 `0015_schema_alignment` 对齐历史索引、租户外键和 ORM 默认值，空库迁移、`alembic check`、Worker 镜像构建/readiness 与 6 项 API integration 均通过。

@@ -109,9 +109,12 @@ class RegressionCase(UUIDPrimaryKeyMixin, Base):
         SqlEnum(RegressionCaseStatus, name="regression_case_status", native_enum=False),
         nullable=False,
         default=RegressionCaseStatus.active,
+        server_default="active",
     )
     created_by: Mapped[UUID] = mapped_column(nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utc_now, server_default="CURRENT_TIMESTAMP"
+    )
 
 
 @event.listens_for(RegressionCase, "before_update")

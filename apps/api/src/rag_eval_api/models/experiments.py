@@ -120,6 +120,7 @@ class Experiment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         nullable=False,
         default=ExperimentStatus.draft,
+        server_default="draft",
     )
     dataset_version_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
     adapter_config_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
@@ -180,6 +181,7 @@ class ExperimentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         nullable=False,
         default=ExperimentRunStatus.queued,
+        server_default="queued",
     )
     total_units: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     completed_units: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
@@ -238,6 +240,7 @@ class ExperimentRunItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         nullable=False,
         default=ExperimentRunItemStatus.queued,
+        server_default="queued",
     )
     attempt_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -289,4 +292,6 @@ class ExperimentRunAttempt(UUIDPrimaryKeyMixin, Base):
     trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, server_default="CURRENT_TIMESTAMP"
+    )
