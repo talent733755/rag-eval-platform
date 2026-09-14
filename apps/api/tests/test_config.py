@@ -114,6 +114,23 @@ def test_development_actor_id_is_optional_when_empty() -> None:
     assert settings.dev_actor_id is None
 
 
+def test_jwt_auth_settings_accept_empty_optional_values() -> None:
+    settings = Settings.model_validate(
+        {
+            "APP_ENV": "development",
+            "AUTH_MODE": "disabled",
+            "AUTH_JWT_SECRET": "",
+            "AUTH_JWT_ISSUER": "",
+            "AUTH_JWT_AUDIENCE": "",
+            "_env_file": None,
+        }
+    )
+
+    assert settings.auth_jwt_secret is None
+    assert settings.auth_jwt_issuer is None
+    assert settings.auth_jwt_audience is None
+
+
 @pytest.mark.parametrize(
     "root",
     [

@@ -26,7 +26,7 @@
 - `.github/workflows/ci.yml`：API/Web 质量门禁、本地集成检查、OpenAPI client diff 校验和 Playwright smoke；
 - `apps/web/e2e/admin-shell.spec.ts`：不依赖外部服务的管理后台浏览器冒烟测试。
 
-当前版本已具备文档导入、候选评测集审核/发布、Adapter/Provider 配置、可恢复实验运行、版本化指标、Trace/失败诊断和回归集基础；真实 OIDC/JWT 认证、成本费率和检索证据评测仍按后续公共契约逐步加入。
+当前版本已具备文档导入、候选评测集审核/发布、Adapter/Provider 配置、可恢复实验运行、版本化指标、Trace/失败诊断和回归集基础；受控部署可使用最小 HS256 JWT 边界，完整 OIDC/JWKS 认证、成本费率和检索证据评测仍按后续公共契约逐步加入。
 
 当前文档摄取阶段已经完成 BlobStore、解析器基础设施、单文件 HTTP 上传入口，以及
 文档/版本读取、显式版本上传、解析重试和任务查询/取消 API，以及独立持久化 Worker；候选生成
@@ -109,6 +109,10 @@ Web 壳层通过 `GET /api/projects` 加载当前 actor 可见的项目。可用
 
 若未执行种子命令，API 会返回 `503 development_actor_not_provisioned`；生产环境不支持该开发 actor，
 必须接入 OIDC/JWT 认证后才能使用项目 API。
+
+需要使用 JWT 的部署可配置 `AUTH_MODE=jwt_hs256`、`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER` 和
+`AUTH_JWT_AUDIENCE`；JWT 还必须包含 `sub`、`organization_id`、`iss`、`aud`、`exp`，并通过数据库
+membership 校验。HS256 是当前受控部署的最小实现，公网部署仍应接入 OIDC/JWKS。
 
 启动 API 和 Web 后，API 地址为 <http://localhost:8003>，Web 地址为 <http://localhost:3003>。API 的 OpenAPI 文档地址为 <http://localhost:8003/openapi.json>。
 

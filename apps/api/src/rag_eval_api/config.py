@@ -342,9 +342,44 @@ class Settings(BaseSettings):
         Field(validation_alias=AliasChoices("DEV_ACTOR_ID", "dev_actor_id")),
     ] = None
 
+    auth_mode: Annotated[
+        Literal["disabled", "jwt_hs256"],
+        Field(validation_alias=AliasChoices("AUTH_MODE", "auth_mode")),
+    ] = "disabled"
+    auth_jwt_secret: Annotated[
+        SecretStr | None,
+        Field(validation_alias=AliasChoices("AUTH_JWT_SECRET", "auth_jwt_secret")),
+    ] = None
+    auth_jwt_issuer: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("AUTH_JWT_ISSUER", "auth_jwt_issuer")),
+    ] = None
+    auth_jwt_audience: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("AUTH_JWT_AUDIENCE", "auth_jwt_audience")),
+    ] = None
+    auth_jwt_leeway_seconds: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=300,
+            validation_alias=AliasChoices("AUTH_JWT_LEEWAY_SECONDS", "auth_jwt_leeway_seconds"),
+        ),
+    ] = 30
+
     @field_validator("dev_actor_id", mode="before")
     @classmethod
     def normalize_dev_actor_id(cls, value: object) -> object:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
+    @field_validator("auth_jwt_secret", mode="before")
+    @classmethod
+    def normalize_auth_jwt_secret(cls, value: object) -> object:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
+    @field_validator("auth_jwt_issuer", "auth_jwt_audience", mode="before")
+    @classmethod
+    def normalize_auth_jwt_string(cls, value: object) -> object:
         return None if value is None or (isinstance(value, str) and not value.strip()) else value
 
     @field_validator("database_url")
@@ -542,6 +577,13 @@ class Settings(BaseSettings):
             raise ValueError("PROVIDER_API_KEY is required when provider is enabled")
         if self.dev_actor_id is not None and self.app_env != APP_ENV_DEVELOPMENT:
             raise ValueError("DEV_ACTOR_ID is only allowed in development")
+        if self.auth_mode == "jwt_hs256":
+            if self.auth_jwt_secret is None or len(self.auth_jwt_secret.get_secret_value()) < 32:
+                raise ValueError(
+                    "AUTH_JWT_SECRET must be at least 32 characters when JWT is enabled"
+                )
+            if not self.auth_jwt_issuer or not self.auth_jwt_audience:
+                raise ValueError("AUTH_JWT_ISSUER and AUTH_JWT_AUDIENCE are required for JWT")
         if self.app_env != APP_ENV_DEVELOPMENT:
             if not secret or secret == DEFAULT_SECRET_KEY or len(secret) < 32:
                 raise ValueError(

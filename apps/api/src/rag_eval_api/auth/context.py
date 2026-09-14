@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rag_eval_api.auth.jwt import InvalidTokenError, verify_hs256_token
 from rag_eval_api.db import get_db_session
 from rag_eval_api.models import Membership
 
@@ -31,6 +32,14 @@ def development_auth_error(code: str, message: str) -> HTTPException:
     """Return a safe configuration error for an unusable development actor."""
 
     return HTTPException(status_code=503, detail={"error": {"code": code, "message": message}})
+
+
+def authentication_error(code: str, message: str, status_code: int = 401) -> HTTPException:
+    """Return an authentication error without exposing token validation details."""
+
+    return HTTPException(
+        status_code=status_code, detail={"error": {"code": code, "message": message}}
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +62,37 @@ async def get_current_actor(
     """
 
     settings = request.app.state.settings
+    if settings.auth_mode == "jwt_hs256":
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise authentication_error(
+                "authentication_required", "Bearer authentication is required."
+            )
+        try:
+            user_id, organization_id = verify_hs256_token(token.strip(), settings)
+        except InvalidTokenError as exc:
+            del exc
+            raise authentication_error("invalid_token", "The access token is invalid.")
+
+        membership_id = (
+            await db_session.execute(
+                select(Membership.id)
+                .where(
+                    Membership.user_id == user_id,
+                    Membership.organization_id == organization_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if membership_id is None:
+            raise authentication_error(
+                "permission_denied",
+                "You do not have permission to access this organization.",
+                status_code=403,
+            )
+        return RequestActor(user_id=user_id, organization_id=organization_id)
+
     if settings.app_env != "development" or settings.dev_actor_id is None:
         raise AUTHENTICATION_NOT_CONFIGURED
 

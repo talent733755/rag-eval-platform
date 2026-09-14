@@ -1,9 +1,9 @@
 # 项目接手文件
 
-> 更新时间：2026-09-13
+> 更新时间：2026-09-14
 > 当前工作目录：`/Users/yanxs/code/ai_coding/rag-eval-platform/.worktrees/mvp-foundation-admin-shell`
 > 当前分支：`codex/mvp-foundation-admin-shell`
-> 当前提交：请以 `git log -1 --oneline` 为准（开发认证与本地种子数据切片）
+> 当前提交：请以 `git log -1 --oneline` 为准（开发认证与可配置 JWT 边界切片）
 
 ## 1. 接续规则
 
@@ -112,7 +112,7 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 截至当前切片已执行：
 
-- API 非集成：`249 passed, 2 skipped, 6 deselected`；
+- API 非集成：`260 passed, 2 skipped, 6 deselected`；
 - 上传 API、读取接口与应用生命周期：`14 passed`；
 - 新增配置边界、生命周期、chunked body、提交失败清理和审计脱敏回归测试；
 - Web：`66 passed`；
@@ -124,7 +124,10 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 - 真实 PostgreSQL/Redis/Worker 集成测试：`6 passed, 251 deselected`，包含迁移头、真实 LocalBlobStore
   并发版本上传、Worker 并发解析闭环和 readiness；
 - 开发认证切片：`DEV_ACTOR_ID` 仅在 development 生效，种子脚本幂等创建本地组织、项目和管理员
-  membership；认证边界测试通过，运行态 `/api/projects` 返回 200，生产仍保持 501 fail-closed；
+  membership；认证边界测试通过，运行态 `/api/projects` 返回 200，未配置认证时仍保持 501 fail-closed；
+- JWT 认证切片：可通过 `AUTH_MODE=jwt_hs256` 启用依赖无关的 HS256 Bearer token 校验，强制验证
+  签名、issuer、audience、exp、nbf 和 UUID 身份声明，并用数据库 membership 确认 token 组织；完整
+  OIDC/JWKS、非对称密钥轮换、登录/刷新会话、撤销策略和认证审计仍是后续发布缺口；
 
 当前文档摄取基础、候选生成、实验、指标、Trace/失败回归和设置页已完成对应 MVP 切片；本分支
 仍未合并回 `main`，但最新提交已推送远程。
@@ -133,7 +136,9 @@ Demo 交付。本项目的铁律是按完整 GitHub 开源项目建设：公共�
 
 文档摄取 HTTP/存储/执行基础闭环已完成。保留的产品与发布质量缺口如下：
 
-1. **认证**：本地 development actor 已接入并通过 membership 推导租户；真实 OIDC/JWT provider 尚未接入，development actor 不能替代生产认证。
+1. **认证**：本地 development actor 已接入并通过 membership 推导租户；当前仅有受控部署可用的 HS256
+   boundary，真实 OIDC/JWKS provider、非对称密钥轮换、登录/刷新会话和撤销策略尚未接入，development
+   actor 不能替代生产认证。
 2. **产品契约**：成本费率、检索证据指标和完整全链路 E2E/Playwright 仍需补齐。
 
 本轮已解决 Docker Hub pinned Python 镜像返回 `403 Forbidden` 的构建阻断：API/Web/Worker 改用

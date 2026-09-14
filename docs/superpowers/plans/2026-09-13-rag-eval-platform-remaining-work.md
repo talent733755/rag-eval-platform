@@ -134,7 +134,7 @@
 
 每个任务必须有实现、异常路径测试、契约文档、受影响模块质量检查和中文提交。所有外部依赖不可用时，系统必须返回明确错误或使用数据库事实源继续工作，不能返回假成功。
 
-## 本轮执行记录（2026-09-13）
+## 本轮执行记录（2026-09-14）
 
 - 已完成 Task 1 Step 1–4：候选生成快照幂等、generation job 复合引用、独立 Candidate Worker、Provider 配置接入和租约 fencing。
 - 已验证：API 非集成测试 `222 passed, 2 skipped, 6 deselected`；候选/文档定向测试 `29 passed`；Web `lint`、`typecheck`、Vitest `58 passed`。
@@ -148,8 +148,9 @@
 - 本轮新增：Python Adapter trusted entry point registry 和模型 Provider CRUD/能力测试；实验实体、启动校验和模型/Adapter 完整快照引用仍待 Task 4/5。
 - 本轮新增：实验/Run/RunItem/Attempt 模型、快照创建/启动校验、租约 Worker、取消/失败项重试 API 和实验页面；运行指标、Trace、成本、取消中断和完整 E2E 仍待后续任务。
 - 本轮新增：`0012_metrics` 迁移、不可变 metric definition/result、Run 终态指标计算、幂等重算和三级下钻 API；metrics/dashboard 已接入真实结果，检索指标等待 Trace 证据持久化。
-- 本轮验证：API 非集成测试 `240 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
+- 本轮验证：API 非集成测试 `260 passed, 2 skipped, 6 deselected`，ruff/mypy/format 全部通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
 - 本轮新增：`0013_traces_failures`、`0014_regression_cases` 迁移，Trace/Failure 脱敏持久化、Blob 引用、失败页和回归集幂等加入；Task 7 当前批次验证 API `244 passed, 2 skipped, 6 deselected`，Web 构建成功。
 - 已知环境限制：Playwright 尚未在本机执行；Compose Worker 集成已切换到内容 digest 相同的 Amazon ECR Public 官方镜像源并通过完整 API integration 门禁。
+- 本轮新增：可配置 HS256 JWT boundary，验证 Bearer token 的签名、issuer、audience、exp、nbf、UUID 身份声明和数据库 membership；完整 OIDC/JWKS、非对称密钥轮换、登录/刷新会话和撤销策略仍待后续接入。
 - 本轮开源验收：补齐 MIT LICENSE、Issue/PR 模板、发布检查清单和 Web/API 依赖许可证记录；升级 Next `15.5.24`、PostCSS `8.5.28`、Sharp `0.35.4` 安全覆盖后，官方 npm audit 无已知漏洞，Python `pip-audit --skip-editable --strict --local` 无已知漏洞。
 - 本轮集成回归：修复 `0005` Alembic check constraint 命名约定，并拆分 `0012/0013/0014` 的 PostgreSQL 多语句 `op.execute`；新增 `0015_schema_alignment` 对齐历史索引、租户外键和 ORM 默认值，空库迁移、`alembic check`、Worker 镜像构建/readiness 与 6 项 API integration 均通过。

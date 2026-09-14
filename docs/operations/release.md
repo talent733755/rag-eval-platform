@@ -76,8 +76,9 @@ uv run --directory apps/api --with pip-audit pip-audit --skip-editable --strict 
 - Provider/Adapter 凭据只能通过安全的进程环境引用进入运行时，不能写入数据库、日志、Trace
   或浏览器存储。
 - 发布前必须确认租户复合授权、append-only 历史表和审计事件测试通过。
-- 当前版本尚未接入真实 OIDC/JWT provider；若仍保持该限制，只能作为受控开发/MVP 发布，不能
-  宣称具备生产认证能力。
+- 当前版本提供受控部署用的 `AUTH_MODE=jwt_hs256` HS256 边界，但尚未接入真实 OIDC/JWKS provider、
+  非对称密钥轮换、登录/刷新会话和撤销策略；因此只能作为受控开发/MVP 发布，不能宣称具备完整生产
+  认证能力。
 
 ## 6. 发布记录
 

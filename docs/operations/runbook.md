@@ -16,7 +16,7 @@ readiness。Worker 使用 PostgreSQL 任务状态作为事实来源，Redis 不�
 
 本地开发必须在 `.env` 中保留 `APP_ENV=development` 和 `DEV_ACTOR_ID`，并在首次启动或重置数据库后
 执行迁移和 `scripts/seed-dev-data.py`。访问 Web 后若看到 `HTTP 501`，先检查是否误以为
-`Authorization` 请求头可以替代认证；生产认证尚未接入，开发 actor 也不会读取任何请求头。
+`Authorization` 请求头可以替代认证；未启用 JWT 时生产认证仍未配置，开发 actor 也不会读取任何请求头。
 
 ## 数据与敏感信息
 
@@ -30,6 +30,6 @@ payload 先脱敏，64 KiB 以内才内联，较大内容使用私有 BlobStore 
 可通过幂等重算接口补写派生结果。不要直接修改或删除 experiment、metric、Trace、failure
 和 regression history；这些表由应用和 PostgreSQL append-only 边界共同保护。
 
-当前已知限制：认证 provider 尚未接入；成本指标尚无费率契约；检索指标等待 Adapter 检索
+当前已知限制：完整 OIDC/JWKS provider、非对称密钥轮换、登录/刷新会话和撤销策略尚未接入；成本指标尚无费率契约；检索指标等待 Adapter 检索
 证据接入。API/Worker/Web 使用 pinned digest 的 Amazon ECR Public 官方镜像源；如所在
 网络无法访问 `public.ecr.aws`，需为 Docker 配置可访问的等价镜像代理，并保持相同内容 digest。
