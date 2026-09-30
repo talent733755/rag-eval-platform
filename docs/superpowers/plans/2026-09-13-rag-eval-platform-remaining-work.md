@@ -84,11 +84,11 @@
 
 **Files:** `apps/api/src/rag_eval_api/models/experiments.py`, `apps/api/alembic/versions/0009_experiments.py`, `apps/api/alembic/versions/0010_experiment_idempotency.py`, `apps/api/alembic/versions/0011_experiment_run_leases.py`, `apps/api/src/rag_eval_api/services/experiment_worker.py`, `apps/api/src/rag_eval_api/routes/experiments.py`, `apps/api/src/rag_eval_api/schemas/experiments.py`, `apps/api/tests/test_experiment_worker.py`, `apps/web/src/app/(app)/experiments/page.tsx`, `apps/web/src/components/experiments/experiments-workspace.tsx`
 
-- [ ] **Step 1:** 写并发、幂等、取消、逐样例重试、租约过期、新 fencing token、成本/耗时统计测试。
+- [x] **Step 1:** 写并发、幂等、取消、逐样例重试、租约过期、新 fencing token、成本/耗时统计测试。本轮补上有界重试（成功/耗尽/不可重试）、cancelling 认领与崩溃回收取消、用量聚合测试。
 - [x] **Step 2:** 已建模 experiment、run、run_item、attempt，保存配置 snapshot 和安全错误；外键带 tenant identity，Run 增加 lease/heartbeat/fencing 字段。
-- [ ] **Step 3:** 已实现按样例 bounded timeout 调 Adapter、usage/latency/trace_id、单样例隔离、过期 lease 恢复和历史 attempt；有限重试、取消中断和成本统计仍需后续增强。
+- [x] **Step 3:** 已实现按样例 bounded timeout 调 Adapter、usage/latency/trace_id、单样例隔离、过期 lease 恢复和历史 attempt；本轮补上有界重试（retry_count + retryable 分类）、cancelling 中断与崩溃回收取消、token/延迟 run/experiment 聚合。精确成本统计仍待 Provider 费率契约。
 - [x] **Step 4:** 已提供创建/启动/取消/失败项重试/详情/列表 API 和实验进度页面；启动前展示样例数和配置选择，成本估计在 Provider 费率契约完成前保持未提供。
-- [ ] **Step 5:** 验证并提交 `feat: 实现实验任务与可恢复运行记录`。
+- [x] **Step 5:** 验证并提交 `feat: 完善实验执行器重试取消与用量统计`。API 非集成测试 `266 passed, 2 skipped, 6 deselected`，ruff/mypy/format 通过；Web lint/typecheck/Vitest `66 passed`，生产构建成功。
 
 ## Task 6：完成指标持久化与 Dashboard
 
@@ -133,6 +133,12 @@
 执行顺序为 Task 1 → Task 2 → Task 3/4 → Task 5 → Task 6 → Task 7 → Task 8 → Task 9。Task 1–2 完成后才算“文档到评测集”闭环；Task 5–7 完成后才算“实验与诊断”闭环；Task 9 完成前项目不能宣称完整 MVP。
 
 每个任务必须有实现、异常路径测试、契约文档、受影响模块质量检查和中文提交。所有外部依赖不可用时，系统必须返回明确错误或使用数据库事实源继续工作，不能返回假成功。
+
+## 本轮执行记录（2026-09-15）
+
+- 已完成 Task 5 剩余能力：按 `retry_count` 与 `retryable` 分类的有界重试、attempt 级 usage/latency/trace_id 记录、cancelling 认领与维护阶段直接取消、崩溃 worker 的 cancelling run 回收、run/experiment token 与延迟聚合（0016 迁移）以及实验列表用量展示。
+- 本轮验证：API 非集成测试 `266 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web Vitest `66 passed`，生产构建成功。
+- 剩余缺口：精确成本统计待 Provider 费率契约；Task 1 数据集分页、Task 2 状态 reducer、Task 8 认证回归矩阵与 OIDC、Task 9 全链路 E2E 与结构化日志统一仍待后续。
 
 ## 本轮执行记录（2026-09-14）
 
