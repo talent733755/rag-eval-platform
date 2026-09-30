@@ -1548,6 +1548,14 @@ export interface components {
             status: string;
             /** Succeeded Units */
             succeeded_units: number;
+            /** Total Input Tokens */
+            total_input_tokens: number | null;
+            /** Total Latency Ms */
+            total_latency_ms: number;
+            /** Total Output Tokens */
+            total_output_tokens: number | null;
+            /** Total Tokens */
+            total_tokens: number | null;
             /** Total Units */
             total_units: number;
             /**
@@ -1642,6 +1650,14 @@ export interface components {
             status: string;
             /** Succeeded Units */
             succeeded_units: number;
+            /** Total Input Tokens */
+            total_input_tokens: number | null;
+            /** Total Latency Ms */
+            total_latency_ms: number;
+            /** Total Output Tokens */
+            total_output_tokens: number | null;
+            /** Total Tokens */
+            total_tokens: number | null;
             /** Total Units */
             total_units: number;
             /**

@@ -45,6 +45,14 @@ class ExperimentWorkerResult:
 
 
 @dataclass(frozen=True, slots=True)
+class _AttemptOutcome:
+    status: str
+    response: Any
+    error_code: str | None
+    error_message: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class _Claim:
     run_id: UUID
     run_item_id: UUID
@@ -54,6 +62,7 @@ class _Claim:
     candidate_item_id: UUID
     question: str
     timeout_seconds: float
+    retry_count: int
     attempt_number: int
     fencing_token: int
     worker_id: str
@@ -111,14 +120,23 @@ class ExperimentWorker:
                         await session.scalars(
                             select(ExperimentRun)
                             .where(
+                                ExperimentRun.status.in_(
+                                    [
+                                        ExperimentRunStatus.running,
+                                        ExperimentRunStatus.cancelling,
+                                    ]
+                                ),
                                 ExperimentRun.lease_expires_at <= now,
-                                ExperimentRun.status == ExperimentRunStatus.running,
                             )
                             .with_for_update(skip_locked=True)
                         )
                     ).all()
                 )
                 for run in runs:
+                    experiment = await session.get(Experiment, run.experiment_id)
+                    if run.status is ExperimentRunStatus.cancelling:
+                        await self._cancel_run(session, run, experiment, now)
+                        continue
                     processing_items = list(
                         (
                             await session.scalars(
@@ -137,6 +155,46 @@ class ExperimentWorker:
                     run.lease_expires_at = None
                     run.heartbeat_at = None
 
+    async def _cancel_run(
+        self,
+        session: AsyncSession,
+        run: ExperimentRun,
+        experiment: Experiment | None,
+        now: datetime,
+    ) -> None:
+        """Cancel every outstanding item and finalize the run and experiment."""
+
+        outstanding = list(
+            (
+                await session.scalars(
+                    select(ExperimentRunItem).where(
+                        ExperimentRunItem.run_id == run.id,
+                        ExperimentRunItem.organization_id == run.organization_id,
+                        ExperimentRunItem.project_id == run.project_id,
+                        ExperimentRunItem.status.in_(
+                            [
+                                ExperimentRunItemStatus.queued,
+                                ExperimentRunItemStatus.processing,
+                            ]
+                        ),
+                    )
+                )
+            ).all()
+        )
+        for item in outstanding:
+            item.status = ExperimentRunItemStatus.cancelled
+            item.completed_at = now
+            run.skipped_units += 1
+            run.completed_units += 1
+        run.status = ExperimentRunStatus.cancelled
+        run.completed_at = now
+        run.worker_id = None
+        run.lease_expires_at = None
+        run.heartbeat_at = None
+        if experiment is not None:
+            experiment.status = ExperimentStatus.cancelled
+            experiment.completed_at = now
+
     async def _claim_next(self) -> _Claim | None:
         now = datetime.now(UTC)
         async with self.session_factory() as session:
@@ -146,10 +204,14 @@ class ExperimentWorker:
                         select(ExperimentRun)
                         .where(
                             ExperimentRun.status.in_(
-                                [ExperimentRunStatus.queued, ExperimentRunStatus.running]
+                                [
+                                    ExperimentRunStatus.queued,
+                                    ExperimentRunStatus.running,
+                                    ExperimentRunStatus.cancelling,
+                                ]
                             ),
                             (
-                                (ExperimentRun.status == ExperimentRunStatus.queued)
+                                (ExperimentRun.status != ExperimentRunStatus.running)
                                 | (ExperimentRun.worker_id == self.worker_id)
                                 | (ExperimentRun.lease_expires_at <= now)
                             ),
@@ -160,6 +222,16 @@ class ExperimentWorker:
                     )
                 ).first()
                 if run is None:
+                    return None
+                experiment = await session.scalar(
+                    select(Experiment).where(
+                        Experiment.id == run.experiment_id,
+                        Experiment.organization_id == run.organization_id,
+                        Experiment.project_id == run.project_id,
+                    )
+                )
+                if run.status is ExperimentRunStatus.cancelling:
+                    await self._cancel_run(session, run, experiment, now)
                     return None
                 item = await session.scalar(
                     select(ExperimentRunItem)
@@ -180,21 +252,7 @@ class ExperimentWorker:
                             else ExperimentRunStatus.failed
                         )
                         run.completed_at = now
-                    elif run.status is ExperimentRunStatus.cancelling:
-                        run.status = ExperimentRunStatus.cancelled
-                        run.completed_at = now
-                        experiment = await session.get(Experiment, run.experiment_id)
-                        if experiment is not None:
-                            experiment.status = ExperimentStatus.cancelled
-                            experiment.completed_at = now
                     return None
-                experiment = await session.scalar(
-                    select(Experiment).where(
-                        Experiment.id == run.experiment_id,
-                        Experiment.organization_id == run.organization_id,
-                        Experiment.project_id == run.project_id,
-                    )
-                )
                 if experiment is None:
                     raise RuntimeError("experiment run references are incomplete")
                 adapter = await session.scalar(
@@ -235,6 +293,7 @@ class ExperimentWorker:
                     candidate_item_id=candidate.id,
                     question=candidate.question,
                     timeout_seconds=adapter.timeout_seconds,
+                    retry_count=adapter.retry_count,
                     attempt_number=item.attempt_count,
                     fencing_token=token,
                     worker_id=self.worker_id,
@@ -244,50 +303,44 @@ class ExperimentWorker:
         claim = await self._claim_next()
         if claim is None:
             return None
-        status = "succeeded"
-        response: Any = None
-        error_code: str | None = None
-        error_message: str | None = None
-        try:
-            async with self.session_factory() as session:
-                adapter_config = await session.scalar(
-                    select(AdapterConfig).where(
-                        AdapterConfig.organization_id == claim.organization_id,
-                        AdapterConfig.project_id == claim.project_id,
-                        AdapterConfig.id
-                        == (
-                            select(Experiment.adapter_config_id)
-                            .where(Experiment.id == claim.experiment_id)
-                            .scalar_subquery()
-                        ),
+        adapter_config = await self._load_adapter_config(claim)
+        if adapter_config is None:
+            outcome = await self._finish(
+                claim,
+                "failed",
+                None,
+                [],
+                "adapter_unavailable",
+                "Adapter configuration is unavailable.",
+            )
+        else:
+            adapter = self.adapter_factory(adapter_config)
+            max_attempts = claim.retry_count + 1
+            attempts: list[_AttemptOutcome] = []
+            outcome = "failed"
+            for index in range(max_attempts):
+                if await self._run_is_cancelling(claim):
+                    outcome = await self._finish(claim, "cancelled", None, attempts, None, None)
+                    break
+                status, response, error_code, error_message, retryable = await self._invoke(
+                    adapter, claim
+                )
+                attempts.append(
+                    _AttemptOutcome(
+                        status=status,
+                        response=response,
+                        error_code=error_code,
+                        error_message=error_message,
                     )
                 )
-            if adapter_config is None:
-                raise AdapterError("adapter_unavailable", "Adapter configuration is unavailable.")
-            adapter = self.adapter_factory(adapter_config)
-            request = AdapterRequest(
-                request_id=str(uuid4()),
-                question=claim.question,
-                timeout_seconds=claim.timeout_seconds,
-                metadata={"run_id": str(claim.run_id), "run_item_id": str(claim.run_item_id)},
-            )
-            response = await asyncio.wait_for(
-                asyncio.to_thread(adapter.run, request), timeout=claim.timeout_seconds
-            )
-        except TimeoutError:
-            status = "failed"
-            error_code, error_message = "adapter_timeout", "Adapter request timed out."
-        except AdapterError as exc:
-            status = "failed"
-            error_code, error_message = exc.code, "Adapter request failed safely."
-        except Exception:
-            LOGGER.exception(
-                "experiment run item failed",
-                extra={"event": "experiment.item_failed", "run_item_id": str(claim.run_item_id)},
-            )
-            status = "failed"
-            error_code, error_message = "adapter_error", "Adapter request failed safely."
-        outcome = await self._finish(claim, status, response, error_code, error_message)
+                if status == "succeeded":
+                    outcome = await self._finish(claim, "succeeded", response, attempts, None, None)
+                    break
+                if not retryable or index == max_attempts - 1:
+                    outcome = await self._finish(
+                        claim, "failed", None, attempts, error_code, error_message
+                    )
+                    break
         if outcome != "lease_lost":
             try:
                 await calculate_completed_run_metrics(self.session_factory, claim.run_id)
@@ -300,11 +353,64 @@ class ExperimentWorker:
                 )
         return outcome
 
+    async def _load_adapter_config(self, claim: _Claim) -> AdapterConfig | None:
+        async with self.session_factory() as session:
+            result = await session.scalar(
+                select(AdapterConfig).where(
+                    AdapterConfig.organization_id == claim.organization_id,
+                    AdapterConfig.project_id == claim.project_id,
+                    AdapterConfig.id
+                    == (
+                        select(Experiment.adapter_config_id)
+                        .where(Experiment.id == claim.experiment_id)
+                        .scalar_subquery()
+                    ),
+                )
+            )
+        return result
+
+    async def _run_is_cancelling(self, claim: _Claim) -> bool:
+        async with self.session_factory() as session:
+            status = await session.scalar(
+                select(ExperimentRun.status).where(
+                    ExperimentRun.id == claim.run_id,
+                    ExperimentRun.organization_id == claim.organization_id,
+                    ExperimentRun.project_id == claim.project_id,
+                )
+            )
+        return status is ExperimentRunStatus.cancelling
+
+    async def _invoke(
+        self, adapter: Adapter, claim: _Claim
+    ) -> tuple[str, Any, str | None, str | None, bool]:
+        request = AdapterRequest(
+            request_id=str(uuid4()),
+            question=claim.question,
+            timeout_seconds=claim.timeout_seconds,
+            metadata={"run_id": str(claim.run_id), "run_item_id": str(claim.run_item_id)},
+        )
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(adapter.run, request), timeout=claim.timeout_seconds
+            )
+        except TimeoutError:
+            return "failed", None, "adapter_timeout", "Adapter request timed out.", True
+        except AdapterError as exc:
+            return "failed", None, exc.code, "Adapter request failed safely.", exc.retryable
+        except Exception:
+            LOGGER.exception(
+                "experiment run item failed",
+                extra={"event": "experiment.item_failed", "run_item_id": str(claim.run_item_id)},
+            )
+            return "failed", None, "adapter_error", "Adapter request failed safely.", False
+        return "succeeded", response, None, None, False
+
     async def _finish(
         self,
         claim: _Claim,
         status: str,
         response: Any,
+        attempts: list[_AttemptOutcome],
         error_code: str | None,
         error_message: str | None,
     ) -> str:
@@ -335,7 +441,7 @@ class ExperimentWorker:
                 )
                 if item is None:
                     return "lease_lost"
-                cancelled = run.status is ExperimentRunStatus.cancelling
+                cancelled = status == "cancelled" or run.status is ExperimentRunStatus.cancelling
                 final_status = (
                     ExperimentRunItemStatus.cancelled
                     if cancelled
@@ -347,6 +453,8 @@ class ExperimentWorker:
                 item.completed_at = now
                 item.error_code = error_code
                 item.error_message = error_message
+                if attempts:
+                    item.attempt_count = claim.attempt_number + len(attempts) - 1
                 persisted_trace_id = (
                     response.trace.trace_id if response is not None and response.trace else None
                 )
@@ -376,21 +484,36 @@ class ExperimentWorker:
                     item.final_usage = response.usage.model_dump(mode="json")
                     item.final_latency_ms = response.usage.latency_ms
                     item.final_trace_id = persisted_trace_id
-                session.add(
-                    ExperimentRunAttempt(
-                        organization_id=claim.organization_id,
-                        project_id=claim.project_id,
-                        run_item_id=item.id,
-                        attempt_number=claim.attempt_number,
-                        status=final_status,
-                        usage=item.final_usage,
-                        latency_ms=item.final_latency_ms,
-                        trace_id=item.final_trace_id,
-                        error_code=error_code,
-                        error_message=error_message,
-                        created_at=now,
+                for index, attempt in enumerate(attempts):
+                    attempt_response = attempt.response
+                    attempt_usage = (
+                        attempt_response.usage.model_dump(mode="json")
+                        if attempt_response is not None
+                        else None
                     )
-                )
+                    attempt_latency = (
+                        attempt_response.usage.latency_ms if attempt_response is not None else None
+                    )
+                    session.add(
+                        ExperimentRunAttempt(
+                            organization_id=claim.organization_id,
+                            project_id=claim.project_id,
+                            run_item_id=item.id,
+                            attempt_number=claim.attempt_number + index,
+                            status=ExperimentRunItemStatus(attempt.status),
+                            usage=attempt_usage,
+                            latency_ms=attempt_latency,
+                            trace_id=(
+                                attempt_response.trace.trace_id
+                                if attempt_response is not None and attempt_response.trace
+                                else None
+                            ),
+                            error_code=attempt.error_code,
+                            error_message=attempt.error_message,
+                            created_at=now,
+                        )
+                    )
+                self._accumulate_usage(run, attempts)
                 if final_status is ExperimentRunItemStatus.failed:
                     await persist_failure_case(
                         session,
@@ -439,8 +562,27 @@ class ExperimentWorker:
                         experiment.completed_units = run.completed_units
                         experiment.succeeded_units = run.succeeded_units
                         experiment.failed_units = run.failed_units
+                        experiment.total_input_tokens = run.total_input_tokens
+                        experiment.total_output_tokens = run.total_output_tokens
+                        experiment.total_tokens = run.total_tokens
+                        experiment.total_latency_ms = run.total_latency_ms
                         experiment.completed_at = now
                 else:
                     run.lease_expires_at = now + self.lease_ttl
                     run.heartbeat_at = now
         return status
+
+    @staticmethod
+    def _accumulate_usage(run: ExperimentRun, attempts: list[_AttemptOutcome]) -> None:
+        for attempt in attempts:
+            response = attempt.response
+            if response is None:
+                continue
+            usage = response.usage
+            if usage.input_tokens is not None:
+                run.total_input_tokens = (run.total_input_tokens or 0) + usage.input_tokens
+            if usage.output_tokens is not None:
+                run.total_output_tokens = (run.total_output_tokens or 0) + usage.output_tokens
+            if usage.total_tokens is not None:
+                run.total_tokens = (run.total_tokens or 0) + usage.total_tokens
+            run.total_latency_ms += usage.latency_ms

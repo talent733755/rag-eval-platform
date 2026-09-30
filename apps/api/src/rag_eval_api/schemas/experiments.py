@@ -46,6 +46,10 @@ class ExperimentRunResponse(BaseModel):
     succeeded_units: int
     failed_units: int
     skipped_units: int
+    total_input_tokens: int | None
+    total_output_tokens: int | None
+    total_tokens: int | None
+    total_latency_ms: int
     created_by: UUID
     started_at: datetime | None
     completed_at: datetime | None
@@ -94,6 +98,10 @@ class ExperimentResponse(BaseModel):
     succeeded_units: int
     failed_units: int
     skipped_units: int
+    total_input_tokens: int | None
+    total_output_tokens: int | None
+    total_tokens: int | None
+    total_latency_ms: int
     created_by: UUID
     started_at: datetime | None
     completed_at: datetime | None
