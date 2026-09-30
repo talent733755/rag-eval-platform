@@ -122,7 +122,7 @@
 
 **Files:** `apps/web/e2e/document-to-dataset.spec.ts`, `experiment-to-trace.spec.ts`, `permissions.spec.ts`, `scripts/seed-e2e-data.sh`, `scripts/check-compose.sh`, observability, CI, `docs/operations/runbook.md`, `LICENSE`
 
-- [ ] **Step 1:** 使用确定性 fixture 验证文档上传→解析→候选生成→审核发布→实验→指标→Trace→回归集；禁止外部 Provider 和真实用户数据。
+- [x] **Step 1:** 使用确定性 fixture 验证文档上传→解析→候选生成→审核发布→实验→指标→Trace→回归集；禁止外部 Provider 和真实用户数据。已修复 `CandidateEvidenceResponse` 缺失 `from_attributes` 导致证据序列化 500 的 bug。
 - [x] **Step 2:** 统一 request/job/attempt/lease/fencing/trace/project/error 字段为 `STRUCTURED_LOG_FIELDS` 白名单；`JsonLogFormatter` 对 error_message 等自由文本字段做 URL/凭据脱敏；Worker 进程入口调用 `configure_logging` 以包级 logger 输出 JSON。
 - [ ] **Step 3:** 使用可访问的 pinned Amazon ECR Public 官方镜像源替换 Docker Hub 后运行 Compose、迁移、Worker ready、Playwright 和 API integration；Worker ready、迁移和 API integration 已通过，Playwright 仍待在 CI/Linux 环境执行；失败上传日志但不上传 secrets。
 - [x] **Step 4:** 已补 MIT LICENSE、依赖许可证清单、npm/pip 审计命令、README、CHANGELOG、Issue/PR 模板和发布检查清单；官方 npm 审计与 Python `pip-audit` 均通过。
@@ -142,8 +142,9 @@
 - Task 2 Step 3：任务状态拆分为独立 `ingestion-job-status` 组件（重试/取消/安全错误），文档详情抽屉复用，新增 3 条组件测试。
 - Task 8 Step 1/2：补充认证回归矩阵（未认证、非 Bearer scheme、过期/无效签名、跨组织、CORS 只放行配置域）和生产环境配置守卫测试（development actor 仅 development、staging/production 禁止默认或短 secret、JWT 模式强制 secret/issuer/audience）。
 - Task 9 Step 2：统一结构化日志字段为 `STRUCTURED_LOG_FIELDS` 白名单（request/job/attempt/lease/fencing/trace/project/error），自由文本字段脱敏 URL/凭据；Worker 入口接入 `configure_logging` 输出包级 JSON 日志；实验 Worker 补充 run/project/attempt/fencing/trace 关联字段。
-- 本轮验证：API 非集成测试 `277 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
-- 剩余缺口：精确成本统计待 Provider 费率契约；Task 9 全链路 E2E fixture 与 Compose/Playwright CI 仍待后续。
+- 本轮验证：API 非集成测试 `278 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
+- Task 9 Step 1：新增 `test_full_chain_e2e.py` 确定性全链路 E2E（SQLite in-memory + FakeCandidateGenerator + ScriptedAdapter），覆盖上传→解析→候选→审核发布→实验→指标→Trace→失败→回归集；顺手修复候选证据 `from_attributes` 序列化 bug。
+- 剩余缺口：精确成本统计待 Provider 费率契约；Task 9 Compose/Playwright CI 仍待后续。
 
 ## 本轮执行记录（2026-09-14）
 

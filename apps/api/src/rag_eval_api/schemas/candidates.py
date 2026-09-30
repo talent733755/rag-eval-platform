@@ -60,6 +60,8 @@ class CandidateDatasetVersionResponse(BaseModel):
 
 
 class CandidateEvidenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     source_version_id: UUID
     chunk_id: UUID
