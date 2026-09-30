@@ -349,7 +349,11 @@ class ExperimentWorker:
                 # and let the explicit recalculation endpoint repair this failure.
                 LOGGER.exception(
                     "experiment metrics calculation failed",
-                    extra={"event": "experiment.metrics_failed", "run_id": str(claim.run_id)},
+                    extra={
+                        "event": "experiment.metrics_failed",
+                        "run_id": str(claim.run_id),
+                        "project_id": str(claim.project_id),
+                    },
                 )
         return outcome
 
@@ -400,7 +404,14 @@ class ExperimentWorker:
         except Exception:
             LOGGER.exception(
                 "experiment run item failed",
-                extra={"event": "experiment.item_failed", "run_item_id": str(claim.run_item_id)},
+                extra={
+                    "event": "experiment.item_failed",
+                    "run_id": str(claim.run_id),
+                    "run_item_id": str(claim.run_item_id),
+                    "project_id": str(claim.project_id),
+                    "attempt_number": claim.attempt_number,
+                    "fencing_token": claim.fencing_token,
+                },
             )
             return "failed", None, "adapter_error", "Adapter request failed safely.", False
         return "succeeded", response, None, None, False
@@ -476,7 +487,10 @@ class ExperimentWorker:
                             "experiment trace persistence failed",
                             extra={
                                 "event": "experiment.trace_failed",
+                                "run_id": str(claim.run_id),
                                 "run_item_id": str(claim.run_item_id),
+                                "project_id": str(claim.project_id),
+                                "trace_id": str(persisted_trace_id) if persisted_trace_id else None,
                             },
                         )
                 if response is not None and not cancelled:

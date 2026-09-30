@@ -209,6 +209,51 @@ def test_log_formatter_emits_structured_fields() -> None:
     assert payload["status_code"] == 200
 
 
+def test_log_formatter_emits_worker_and_trace_fields() -> None:
+    from rag_eval_api.main import JsonLogFormatter
+
+    record = logging.LogRecord("test", logging.INFO, __file__, 1, "worker.lease_lost", (), None)
+    setattr(record, "event", "worker.lease_lost")
+    setattr(record, "job_id", "job-1")
+    setattr(record, "run_id", "run-1")
+    setattr(record, "run_item_id", "item-1")
+    setattr(record, "attempt_number", 2)
+    setattr(record, "lease_id", "lease-1")
+    setattr(record, "fencing_token", 7)
+    setattr(record, "trace_id", "trace-1")
+    setattr(record, "project_id", "project-1")
+    setattr(record, "error_code", "adapter_error")
+
+    payload = json.loads(JsonLogFormatter().format(record))
+
+    for key in (
+        "job_id",
+        "run_id",
+        "run_item_id",
+        "attempt_number",
+        "lease_id",
+        "fencing_token",
+        "trace_id",
+        "project_id",
+        "error_code",
+    ):
+        assert payload[key] is not None, key
+
+
+def test_log_formatter_redacts_credentials_in_freeform_fields() -> None:
+    from rag_eval_api.main import JsonLogFormatter
+
+    record = logging.LogRecord("test", logging.ERROR, __file__, 1, "worker.failed", (), None)
+    setattr(record, "event", "worker.failed")
+    setattr(record, "error_message", "request to https://user:secret@api.example failed token=abc")
+    setattr(record, "job_id", "job-1")
+
+    payload = json.loads(JsonLogFormatter().format(record))
+
+    assert "secret" not in payload["error_message"]
+    assert "token=abc" not in payload["error_message"]
+
+
 def test_unhandled_failure_logs_sanitized_context_and_completion(
     app: object, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -289,3 +334,23 @@ async def test_resource_cleanup_closes_redis_when_database_dispose_fails(
     assert all(record.name == logger.name for record in cleanup_records)
     assert any(isinstance(handler.formatter, JsonLogFormatter) for handler in logger.handlers)
     assert "secret" not in str(getattr(cleanup_records[0], "exception_message", ""))
+
+
+def test_worker_entrypoint_configures_json_logging(monkeypatch: pytest.MonkeyPatch) -> None:
+    import rag_eval_api.worker as worker_module
+    from rag_eval_api.main import JsonLogFormatter
+
+    monkeypatch.setattr(
+        worker_module,
+        "get_settings",
+        lambda: worker_module.Settings(_env_file=None, worker_enabled=False),
+    )
+
+    result = worker_module.main(["--once"])
+
+    assert result == 0
+    package_logger = logging.getLogger("rag_eval_api")
+    assert any(
+        isinstance(handler.formatter, JsonLogFormatter) for handler in package_logger.handlers
+    )
+    assert worker_module.LOGGER.name.startswith(package_logger.name)

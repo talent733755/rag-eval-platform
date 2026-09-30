@@ -46,9 +46,47 @@ from rag_eval_api.storage.protocol import BlobStore
 HEALTH_CHECK_TIMEOUT_SECONDS = 2.0
 logger = logging.getLogger(LOGGER_NAME)
 
+# Unified structured log fields for API, Worker, Provider and Adapter events.
+# Any field outside this allowlist is dropped; secrets are always redacted.
+STRUCTURED_LOG_FIELDS = (
+    "method",
+    "path",
+    "status_code",
+    "duration_ms",
+    "exception_type",
+    "exception_message",
+    "error_code",
+    "error_message",
+    "resource",
+    "project_id",
+    "organization_id",
+    "document_id",
+    "document_version_id",
+    "job_id",
+    "job_kind",
+    "run_id",
+    "run_item_id",
+    "attempt_id",
+    "attempt_number",
+    "lease_id",
+    "fencing_token",
+    "trace_id",
+    "storage_key",
+    "storage_key_present",
+    "blob_size",
+    "orphan_blobs_scanned",
+    "orphan_blobs_deleted",
+    "recovered_jobs",
+    "failed_count",
+    "cleanup_failed",
+)
+
+# Free-form fields that may carry untrusted text and must be redacted.
+_REDACTED_TEXT_FIELDS = {"error_message"}
+
 
 class JsonLogFormatter(logging.Formatter):
-    """Render structured records as compact JSON."""
+    """Render structured records as compact JSON with secret redaction."""
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
@@ -56,19 +94,23 @@ class JsonLogFormatter(logging.Formatter):
             "logger": record.name,
             "level": record.levelname,
         }
-        for field in (
-            "method",
-            "path",
-            "status_code",
-            "duration_ms",
-            "exception_type",
-            "exception_message",
-            "resource",
-        ):
+        for field in STRUCTURED_LOG_FIELDS:
             value = getattr(record, field, None)
-            if value is not None:
-                payload[field] = value
+            if value is None:
+                continue
+            if field in _REDACTED_TEXT_FIELDS:
+                value = _redact_text(str(value))
+            payload[field] = value
         return json.dumps(payload, separators=(",", ":"))
+
+
+def _redact_text(text: str) -> str:
+    redacted = re.sub(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s]+", "[redacted-url]", text)
+    return re.sub(
+        r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*=\s*[^\s]+",
+        r"\1=[redacted]",
+        redacted,
+    )[:200]
 
 
 def sanitize_exception(exc: Exception) -> str:
@@ -85,10 +127,16 @@ def sanitize_exception(exc: Exception) -> str:
 
 def configure_logging(settings: Settings) -> None:
     logger.setLevel(settings.log_level.upper())
+    package_logger = logging.getLogger("rag_eval_api")
+    package_logger.setLevel(settings.log_level.upper())
     if not logger.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(JsonLogFormatter())
         logger.addHandler(handler)
+    if not package_logger.handlers:
+        package_handler = logging.StreamHandler()
+        package_handler.setFormatter(JsonLogFormatter())
+        package_logger.addHandler(package_handler)
     logger.propagate = False
 
 

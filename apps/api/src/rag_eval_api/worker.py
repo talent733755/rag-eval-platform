@@ -23,6 +23,7 @@ from rag_eval_api.adapters.errors import AdapterError
 from rag_eval_api.candidates.provider import OpenAICompatibleCandidateGenerator
 from rag_eval_api.config import Settings, get_settings
 from rag_eval_api.db import create_engine
+from rag_eval_api.main import configure_logging
 from rag_eval_api.models import AdapterConfig, AdapterKind
 from rag_eval_api.parsers.registry import ParserRegistry
 from rag_eval_api.services.candidate_worker import CandidateWorker
@@ -365,6 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = get_settings()
+    configure_logging(settings)
     if args.poll_interval is not None:
         if not 0.1 <= args.poll_interval <= 60:
             raise SystemExit("--poll-interval must be between 0.1 and 60 seconds")
