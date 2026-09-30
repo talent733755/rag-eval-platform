@@ -39,7 +39,7 @@
 - [x] **Step 2: 增加 generation job 持久化。** 复用 `IngestionJob` 的租约与 attempt 机制，新增 `source_version_id`、`generation_config_id`、`candidate_dataset_version_id` 及租户复合外键，迁移从 0004 升级并提供降级。
 - [x] **Step 3: 实现快照服务。** 事务内校验明确版本和不可变 chunks，计算排序后的 hash，创建 `CandidateGenerationConfig`、`CandidateDataset`、`CandidateDatasetVersion` 和 generation job。
 - [x] **Step 4: 实现候选 Worker。** 已实现仅 claim `generate_candidates`、Provider 结果校验、item/evidence/version 写入、heartbeat、取消和 fencing；真实 Provider runtime 已按配置接入，有限重试策略仍需在实验执行器阶段统一。
-- [ ] **Step 5: 接通 API 和 OpenAPI。** 生成接口和 Web typed client 已接通，Provider 不可用返回 503 且不创建候选；数据集分页/统一错误契约和审核页面闭环归入 Task 2，需继续完成后再勾选本步。
+- [x] **Step 5: 接通 API 和 OpenAPI。** 生成接口和 Web typed client 已接通，Provider 不可用返回 503 且不创建候选；数据集游标分页/统一错误契约和审核页面闭环已随 Task 2 完成。
 - [ ] **Step 6: 验证并提交。** 运行候选定向测试、API 非集成测试、Ruff、mypy、Alembic offline SQL；提交 `feat: 完成候选生成持久化与worker执行`。
 
 ## Task 2：完成 Documents/评测集/审核 Web 闭环
@@ -137,7 +137,7 @@
 ## 本轮执行记录（2026-09-15）
 
 - Task 5：已完成按 `retry_count` 与 `retryable` 分类的有界重试、attempt 级 usage/latency/trace_id 记录、cancelling 认领与维护阶段直接取消、崩溃 worker 的 cancelling run 回收、run/experiment token 与延迟聚合（0016 迁移）以及实验列表用量展示。
-- Task 1 Step 5：候选 items 列表改为 `{items, next_cursor}` 有界游标分页（page_size ≤ 200），无效游标返回统一 422 `validation_error`；Web 审核队列按游标循环拉取全量候选，typed client 支持分页参数。
+- Task 1 Step 5：候选生成接口/typed client 已接通；候选 items 列表改为 `{items, next_cursor}` 有界游标分页（page_size ≤ 200），无效游标返回统一 422 `validation_error`；Web 审核队列按游标循环拉取全量候选。
 - Task 2 Step 1：新增 documents reducer 与 9 条状态机测试，工作台统一管理列表 loading/error、summary/游标、上传 per-file 结果与 job 关联；上传部分失败标记为 partial。
 - Task 2 Step 3：任务状态拆分为独立 `ingestion-job-status` 组件（重试/取消/安全错误），文档详情抽屉复用，新增 3 条组件测试。
 - 本轮验证：API 非集成测试 `267 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
