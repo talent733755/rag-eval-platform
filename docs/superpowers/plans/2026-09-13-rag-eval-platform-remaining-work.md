@@ -50,11 +50,11 @@
 - Modify: `apps/web/src/lib/api/client.ts`, `apps/web/src/app/(app)/documents/page.tsx`, `apps/web/src/app/(app)/datasets/page.tsx`, `apps/web/src/app/(app)/review/page.tsx`
 - Test: `apps/web/tests/documents-reducer.test.ts`, `apps/web/tests/documents-page.test.tsx`, `apps/web/tests/candidate-review.test.tsx`
 
-- [ ] **Step 1: 测试状态机。** 固定 project/query/type/status/cursor 保留规则、列表 loading/error/403/409/503、每文件独立批量结果、job 轮询仅更新对应行、取消停止轮询、归档/重试刷新当前 cursor。
+- [x] **Step 1: 测试状态机。** 已新增 `documents-reducer.test.ts` 与 `documents-reducer`，覆盖 project/query 切换、列表 loading/error、summary 与游标保留、每文件独立批量结果（含 partial）、job 仅关联对应行、终态停止跟踪和刷新替换列表。
 - [x] **Step 2: 扩展 typed client。** 已增加文档详情、任务、归档、重试、取消、候选生成及评测集/version/items/review/publish 方法；统一错误信封只保留状态、错误码和安全消息。
-- [ ] **Step 3: 实现文档详情和任务状态。** 展示版本号、sha256 摘要、解析状态、失败安全码、取消/重试/归档按钮；轮询使用 AbortController 和退避，组件卸载必须取消请求。
+- [x] **Step 3: 实现文档详情和任务状态。** 文档详情抽屉展示版本号、sha256 摘要、解析状态与失败安全码；任务状态拆分为独立 `ingestion-job-status` 组件并提供取消/重试按钮；轮询使用 AbortController 与退避，组件卸载取消请求。
 - [x] **Step 4: 实现候选审核。** `/review` 已展示问题、参考答案、来源版本和 chunk excerpt，支持逐条接受/拒绝，发布前阻止 pending，发布后禁用修改。
-- [ ] **Step 5: 验证并提交。** 运行 Web lint、typecheck、Vitest、build；提交 `feat: 完成文档与候选审核web闭环`。
+- [x] **Step 5: 验证并提交。** 已运行 Web lint、typecheck、Vitest `75 passed` 和 `make build`；提交 `refactor: 文档工作台状态收敛为 reducer`。
 
 ## Task 3：完成 Adapter 公共实现和配置管理
 
@@ -136,9 +136,12 @@
 
 ## 本轮执行记录（2026-09-15）
 
-- 已完成 Task 5 剩余能力：按 `retry_count` 与 `retryable` 分类的有界重试、attempt 级 usage/latency/trace_id 记录、cancelling 认领与维护阶段直接取消、崩溃 worker 的 cancelling run 回收、run/experiment token 与延迟聚合（0016 迁移）以及实验列表用量展示。
-- 本轮验证：API 非集成测试 `266 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web Vitest `66 passed`，生产构建成功。
-- 剩余缺口：精确成本统计待 Provider 费率契约；Task 1 数据集分页、Task 2 状态 reducer、Task 8 认证回归矩阵与 OIDC、Task 9 全链路 E2E 与结构化日志统一仍待后续。
+- Task 5：已完成按 `retry_count` 与 `retryable` 分类的有界重试、attempt 级 usage/latency/trace_id 记录、cancelling 认领与维护阶段直接取消、崩溃 worker 的 cancelling run 回收、run/experiment token 与延迟聚合（0016 迁移）以及实验列表用量展示。
+- Task 1 Step 5：候选 items 列表改为 `{items, next_cursor}` 有界游标分页（page_size ≤ 200），无效游标返回统一 422 `validation_error`；Web 审核队列按游标循环拉取全量候选，typed client 支持分页参数。
+- Task 2 Step 1：新增 documents reducer 与 9 条状态机测试，工作台统一管理列表 loading/error、summary/游标、上传 per-file 结果与 job 关联；上传部分失败标记为 partial。
+- Task 2 Step 3：任务状态拆分为独立 `ingestion-job-status` 组件（重试/取消/安全错误），文档详情抽屉复用，新增 3 条组件测试。
+- 本轮验证：API 非集成测试 `267 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
+- 剩余缺口：精确成本统计待 Provider 费率契约；Task 8 认证回归矩阵与 OIDC、Task 9 全链路 E2E 与结构化日志统一仍待后续。
 
 ## 本轮执行记录（2026-09-14）
 
