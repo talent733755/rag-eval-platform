@@ -289,6 +289,64 @@ async def test_jwt_rejects_token_for_organization_without_membership(
     assert response.json()["error"]["code"] == "permission_denied"
 
 
+@pytest.mark.asyncio
+async def test_jwt_requires_authorization_header(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    application, client, _ = authentication_environment
+    configure_jwt(application)
+
+    response = await client.get("/api/projects")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "error": {
+            "code": "authentication_required",
+            "message": "Bearer authentication is required.",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_jwt_rejects_non_bearer_scheme(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    application, client, _ = authentication_environment
+    configure_jwt(application)
+
+    basic = await client.get("/api/projects", headers={"Authorization": "Basic dXNlcjpwYXNz"})
+    missing_token = await client.get("/api/projects", headers={"Authorization": "Bearer "})
+
+    for response in (basic, missing_token):
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "authentication_required"
+
+
+@pytest.mark.asyncio
+async def test_cors_allows_only_configured_origin(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, client, _ = authentication_environment
+
+    allowed = await client.options(
+        "/api/projects",
+        headers={
+            "Origin": "http://localhost:3003",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    rejected = await client.options(
+        "/api/projects",
+        headers={
+            "Origin": "https://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:3003"
+    assert "access-control-allow-origin" not in rejected.headers
+
+
 def test_empty_dev_actor_id_is_treated_as_unset() -> None:
     settings = Settings.model_validate(
         {

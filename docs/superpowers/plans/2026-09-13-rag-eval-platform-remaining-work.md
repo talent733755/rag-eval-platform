@@ -113,8 +113,8 @@
 
 **Files:** auth middleware/providers, settings routes/pages, dashboard aggregation, tests, `docs/security/`, `docs/operations/runbook.md`
 
-- [ ] **Step 1:** 补认证回归测试：未认证、过期 token、跨组织 ID、viewer/editor/admin 边界、审计事件和 CORS。
-- [ ] **Step 2:** 实现可替换 OIDC/JWT boundary；development actor 仅 development 可启用，production 禁止默认 secret。
+- [x] **Step 1:** 已补认证回归测试：未认证、非 Bearer scheme、过期 token、无效签名、跨组织 ID 无成员资格、viewer/editor/admin 边界、审计事件与 CORS 只放行配置域。
+- [x] **Step 2:** 已验证可替换 OIDC/JWT boundary：JWT HS256 验证 issuer/audience/exp/nbf；development actor 仅 development 可启用；staging/production 禁止默认或短 secret；JWT 模式强制 secret/issuer/audience。
 - [x] **Step 3:** 已将既有成员 API、Provider 配置 API 接入设置页；Dashboard/指标页读取真实版本化结果并覆盖空/加载/错误状态，跨租户聚合 API 和更细粒度筛选仍待补强。
 - [x] **Step 4:** 已补认证边界、Provider 密钥、Trace 脱敏、数据保留和运行故障处置说明；OIDC/JWT provider 接入仍是明确缺口。
 
@@ -140,8 +140,9 @@
 - Task 1 Step 5：候选生成接口/typed client 已接通；候选 items 列表改为 `{items, next_cursor}` 有界游标分页（page_size ≤ 200），无效游标返回统一 422 `validation_error`；Web 审核队列按游标循环拉取全量候选。
 - Task 2 Step 1：新增 documents reducer 与 9 条状态机测试，工作台统一管理列表 loading/error、summary/游标、上传 per-file 结果与 job 关联；上传部分失败标记为 partial。
 - Task 2 Step 3：任务状态拆分为独立 `ingestion-job-status` 组件（重试/取消/安全错误），文档详情抽屉复用，新增 3 条组件测试。
-- 本轮验证：API 非集成测试 `267 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
-- 剩余缺口：精确成本统计待 Provider 费率契约；Task 8 认证回归矩阵与 OIDC、Task 9 全链路 E2E 与结构化日志统一仍待后续。
+- Task 8 Step 1/2：补充认证回归矩阵（未认证、非 Bearer scheme、过期/无效签名、跨组织、CORS 只放行配置域）和生产环境配置守卫测试（development actor 仅 development、staging/production 禁止默认或短 secret、JWT 模式强制 secret/issuer/audience）。
+- 本轮验证：API 非集成测试 `274 passed, 2 skipped, 6 deselected`；`make lint && make typecheck && make test && make build` 全部通过；Web lint/typecheck/Vitest `78 passed`，生产构建成功。
+- 剩余缺口：精确成本统计待 Provider 费率契约；Task 9 全链路 E2E 与结构化日志统一仍待后续。
 
 ## 本轮执行记录（2026-09-14）
 

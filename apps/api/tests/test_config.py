@@ -114,6 +114,43 @@ def test_development_actor_id_is_optional_when_empty() -> None:
     assert settings.dev_actor_id is None
 
 
+def test_development_actor_id_is_rejected_outside_development() -> None:
+    with pytest.raises(ValueError, match="only allowed in development"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            dev_actor_id="00000000-0000-4000-8000-000000000001",
+        )
+
+
+@pytest.mark.parametrize("env", ["staging", "production"])
+def test_non_development_rejects_default_secret_key(env: str) -> None:
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(_env_file=None, app_env=env)
+
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(_env_file=None, app_env=env, secret_key=SecretStr("short"))
+
+
+def test_jwt_mode_requires_secret_and_issuer_audience() -> None:
+    with pytest.raises(ValueError, match="AUTH_JWT_SECRET"):
+        Settings(_env_file=None, auth_mode="jwt_hs256")
+
+    with pytest.raises(ValueError, match="AUTH_JWT_SECRET"):
+        Settings(_env_file=None, auth_mode="jwt_hs256", auth_jwt_secret=SecretStr("short"))
+
+    with pytest.raises(ValueError, match="AUTH_JWT_ISSUER"):
+        Settings(_env_file=None, auth_mode="jwt_hs256", auth_jwt_secret=SecretStr("s" * 40))
+
+    with pytest.raises(ValueError, match="AUTH_JWT_ISSUER"):
+        Settings(
+            _env_file=None,
+            auth_mode="jwt_hs256",
+            auth_jwt_secret=SecretStr("s" * 40),
+            auth_jwt_issuer="https://issuer.example",
+        )
+
+
 def test_jwt_auth_settings_accept_empty_optional_values() -> None:
     settings = Settings.model_validate(
         {
