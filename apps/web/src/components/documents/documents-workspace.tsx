@@ -1,16 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { DataCard } from "@/components/ui/data-card";
 import { DocumentDetailDrawer } from "@/components/documents/document-detail-drawer";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { createApiClient } from "@/lib/api/client";
-import type { components } from "@/lib/api/generated";
+import { documentsReducer, initialDocumentsState } from "@/lib/documents/reducer";
 import { getProjectIdFromSearch, useProjectSearch } from "@/lib/project-context";
-
-type DocumentRow = components["schemas"]["DocumentResponse"];
 
 function statusFor(value?: string): StatusBadgeStatus {
   if (value === "succeeded") return "success";
@@ -26,36 +24,32 @@ function statusLabel(value?: string): string {
 export function DocumentsWorkspace() {
   const search = useProjectSearch();
   const projectId = getProjectIdFromSearch(search);
-  const [rows, setRows] = useState<DocumentRow[]>([]);
-  const [summary, setSummary] = useState<Record<string, number>>({ total: 0 });
+  const [state, dispatch] = useReducer(documentsReducer, initialDocumentsState);
   const [query, setQuery] = useState("");
-  const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [uploadState, setUploadState] = useState<"idle" | "uploading" | "success" | "error">("idle");
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [jobIds, setJobIds] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const client = useMemo(() => createApiClient(), []);
   const refreshDocuments = useCallback(() => setRefreshNonce((current) => current + 1), []);
+  const rows = state.items;
 
   useEffect(() => {
     if (!projectId) return;
     const controller = new AbortController();
-    setState("loading");
-    setError(null);
+    dispatch({ type: "list_started" });
     client
       .listDocuments(projectId, { query: query ? { q: query } : undefined, signal: controller.signal })
       .then((response) => {
-        setRows(response.items);
-        setSummary(response.summary ?? { total: response.items.length });
-        setState("success");
+        dispatch({
+          type: "list_succeeded",
+          items: response.items,
+          summary: response.summary ?? { total: response.items.length },
+          nextCursor: response.next_cursor ?? null,
+        });
       })
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
-        setError(reason instanceof Error ? reason.message : "文档加载失败");
-        setState("error");
+        dispatch({ type: "list_failed", message: reason instanceof Error ? reason.message : "文档加载失败" });
       });
     return () => controller.abort();
   }, [client, projectId, query, refreshNonce]);
@@ -66,31 +60,28 @@ export function DocumentsWorkspace() {
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     if (files.length > 20) {
-      setUploadState("error");
-      setUploadMessage("一次最多上传 20 个文件。");
+      dispatch({ type: "upload_rejected", message: "一次最多上传 20 个文件。" });
       return;
     }
-    setUploadState("uploading");
-    setUploadMessage(null);
+    dispatch({ type: "upload_started" });
     try {
       const result = await client.uploadDocuments(projectId, Array.from(files));
-      setJobIds((current) => {
-        const next = { ...current };
-        for (const item of result.items) {
-          if (item.response) next[item.response.document.id] = item.response.ingestion_job.id;
+      for (const item of result.items) {
+        if (item.response) {
+          dispatch({ type: "job_associated", documentId: item.response.document.id, jobId: item.response.ingestion_job.id });
         }
-        return next;
-      });
-      const failed = result.items.filter((item) => item.status === "failed");
+      }
+      dispatch({ type: "upload_finished", outcomes: result.items });
       const refreshed = await client.listDocuments(projectId, { query: query ? { q: query } : undefined });
-      setRows(refreshed.items);
-      setSummary(refreshed.summary ?? { total: refreshed.items.length });
-      setUploadState(failed.length ? "error" : "success");
-      setUploadMessage(failed.length ? `${failed.length} 个文件上传失败，请查看详情。` : `已提交 ${result.items.length} 个文件，解析任务已排队。`);
+      dispatch({
+        type: "list_succeeded",
+        items: refreshed.items,
+        summary: refreshed.summary ?? { total: refreshed.items.length },
+        nextCursor: refreshed.next_cursor ?? null,
+      });
       if (inputRef.current) inputRef.current.value = "";
     } catch (reason: unknown) {
-      setUploadState("error");
-      setUploadMessage(reason instanceof Error ? reason.message : "文件上传失败");
+      dispatch({ type: "upload_failed", message: reason instanceof Error ? reason.message : "文件上传失败" });
     }
   };
 
@@ -103,15 +94,15 @@ export function DocumentsWorkspace() {
           <p className="mt-2 text-sm text-muted">管理原始文档、版本和可追溯的解析状态。</p>
         </div>
         <label className="inline-flex cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-          {uploadState === "uploading" ? "上传中…" : "上传文档"}
-          <input ref={inputRef} className="sr-only" type="file" multiple accept=".pdf,.docx,.md,.markdown,.txt" disabled={uploadState === "uploading"} onChange={(event) => void handleFiles(event.target.files)} />
+          {state.uploadState === "uploading" ? "上传中…" : "上传文档"}
+          <input ref={inputRef} className="sr-only" type="file" multiple accept=".pdf,.docx,.md,.markdown,.txt" disabled={state.uploadState === "uploading"} onChange={(event) => void handleFiles(event.target.files)} />
         </label>
       </div>
 
-      {uploadMessage && <p className={uploadState === "error" ? "text-sm text-danger-foreground" : "text-sm text-success-foreground"} role={uploadState === "error" ? "alert" : "status"}>{uploadMessage}</p>}
+      {state.uploadMessage && <p className={state.uploadState === "error" || state.uploadState === "partial" ? "text-sm text-danger-foreground" : "text-sm text-success-foreground"} role={state.uploadState === "error" ? "alert" : "status"}>{state.uploadMessage}</p>}
 
       <section aria-label="文档统计" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <DataCard label="文档总数" value={summary.total ?? rows.length} supportingText="当前项目" />
+        <DataCard label="文档总数" value={state.summary.total ?? rows.length} supportingText="当前项目" />
         <DataCard label="解析成功" value={rows.filter((row) => row.latest_version?.parse_status === "succeeded").length} supportingText="可生成候选" />
         <DataCard label="解析中" value={rows.filter((row) => ["queued", "processing"].includes(row.latest_version?.parse_status ?? "")).length} supportingText="等待 Worker" />
         <DataCard label="解析失败" value={rows.filter((row) => row.latest_version?.parse_status === "failed").length} supportingText="需要重试" />
@@ -125,9 +116,9 @@ export function DocumentsWorkspace() {
             <input className="rounded-md border border-border bg-canvas px-3 py-2 text-text" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="文档名称" />
           </label>
         </div>
-        {state === "loading" && <p className="mt-6 text-sm text-muted" role="status">正在加载文档…</p>}
-        {state === "error" && <p className="mt-6 text-sm text-danger-foreground" role="alert">{error}</p>}
-        {state === "success" && rows.length === 0 && <p className="mt-6 text-sm text-muted">还没有文档。上传一份 PDF、Word、Markdown 或 TXT 后即可开始解析。</p>}
+        {state.listState === "loading" && <p className="mt-6 text-sm text-muted" role="status">正在加载文档…</p>}
+        {state.listState === "error" && <p className="mt-6 text-sm text-danger-foreground" role="alert">{state.error}</p>}
+        {state.listState === "success" && rows.length === 0 && <p className="mt-6 text-sm text-muted">还没有文档。上传一份 PDF、Word、Markdown 或 TXT 后即可开始解析。</p>}
         {rows.length > 0 && (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[680px] text-left text-sm">
@@ -143,7 +134,7 @@ export function DocumentsWorkspace() {
           </div>
         )}
       </section>
-      {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} jobId={jobIds[selectedDocumentId]} onClose={() => setSelectedDocumentId(null)} onChanged={refreshDocuments} />}
+      {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} jobId={state.jobsByDocument[selectedDocumentId]} onClose={() => setSelectedDocumentId(null)} onChanged={refreshDocuments} />}
     </div>
   );
 }
