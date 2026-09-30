@@ -11,7 +11,8 @@ import { initialReviewState, reviewReducer, type ReviewItem } from "@/lib/candid
 type Api = ReturnType<typeof createApiClient>;
 type Dataset = Awaited<ReturnType<Api["listCandidateDatasets"]>>[number];
 type Version = Awaited<ReturnType<Api["listCandidateDatasetVersions"]>>[number];
-type Item = Awaited<ReturnType<Api["listCandidateItems"]>>[number];
+type ItemList = Awaited<ReturnType<Api["listCandidateItems"]>>;
+type Item = ItemList["items"][number];
 
 export function CandidateReviewWorkspace() {
   const projectSearch = useProjectSearch();
@@ -62,14 +63,28 @@ export function CandidateReviewWorkspace() {
     if (!projectId || !datasetId || !versionId) return;
     const controller = new AbortController();
     setLoading(true);
-    client
-      .listCandidateItems(projectId, datasetId, versionId, { signal: controller.signal })
-      .then((result) => dispatch({ type: "items_loaded", items: result as Item[] as ReviewItem[] }))
-      .catch((reason: unknown) => {
+    const loadItems = async () => {
+      try {
+        let cursor: string | undefined;
+        const collected: ReviewItem[] = [];
+        for (;;) {
+          const page: ItemList = await client.listCandidateItems(projectId, datasetId, versionId, {
+            query: cursor ? { cursor } : {},
+            signal: controller.signal,
+          });
+          collected.push(...(page.items as Item[] as ReviewItem[]));
+          if (!page.next_cursor) break;
+          cursor = page.next_cursor;
+        }
+        dispatch({ type: "items_loaded", items: collected });
+      } catch (reason: unknown) {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
         dispatch({ type: "review_failed", itemId: "", message: reason instanceof Error ? reason.message : "候选加载失败" });
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadItems();
     return () => controller.abort();
   }, [client, datasetId, projectId, versionId]);
 

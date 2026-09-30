@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from io import BufferedReader
 from typing import BinaryIO
 from uuid import UUID, uuid4
@@ -738,6 +738,130 @@ async def test_candidate_dataset_version_can_be_listed_and_published_when_empty(
     assert versions.json()[0]["version_number"] == 1
     assert published.status_code == 200
     assert published.json()["status"] == "published"
+
+
+@pytest.mark.asyncio
+async def test_candidate_items_are_cursor_paginated(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    async with session_factory() as session:
+        document = Document(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            display_name="来源文档",
+            source_type=DocumentSourceType.markdown,
+        )
+        session.add(document)
+        await session.flush()
+        document_version = DocumentVersion(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            document_id=document.id,
+            version_number=1,
+            sha256="a" * 64,
+            byte_size=1,
+            detected_mime="text/markdown",
+            storage_key="test/source.md",
+            parse_status=DocumentParseStatus.succeeded,
+        )
+        dataset = CandidateDataset(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            name="分页评测集",
+            status=CandidateDatasetStatus.draft,
+        )
+        session.add_all([document_version, dataset])
+        await session.flush()
+        version = CandidateDatasetVersion(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset.id,
+            version_number=1,
+            status=CandidateDatasetStatus.draft,
+            created_by=EDITOR_ID,
+        )
+        generation_config = CandidateGenerationConfig(
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            dataset_id=dataset.id,
+            capability_version="candidate-generation-v1",
+            provider_name="fixture",
+            model_name="fixture-model",
+            prompt_version="prompt-v1",
+            requested_version_ids=[str(document_version.id)],
+            chunk_content_hashes=[],
+            environment={},
+            request_id=f"pagination-{uuid4()}",
+        )
+        session.add_all([version, generation_config])
+        await session.flush()
+        for ordinal in range(5):
+            session.add(
+                CandidateDatasetItem(
+                    organization_id=seed.organization_id,
+                    project_id=seed.project_id,
+                    dataset_id=dataset.id,
+                    dataset_version_id=version.id,
+                    generation_config_id=generation_config.id,
+                    source_version_id=document_version.id,
+                    question=f"问题 {ordinal}",
+                    question_type="factual",
+                    reference_answer=f"答案 {ordinal}",
+                    confidence=1,
+                    automatic_checks={},
+                    review_status=CandidateReviewStatus.pending,
+                    provenance={},
+                    created_at=base_time + timedelta(seconds=ordinal),
+                )
+            )
+        await session.commit()
+        dataset_id, version_id = dataset.id, version.id
+
+    first = await client.get(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}"
+        f"/versions/{version_id}/items",
+        params={"page_size": 2},
+    )
+    assert first.status_code == 200
+    first_body = first.json()
+    assert [item["question"] for item in first_body["items"]] == ["问题 0", "问题 1"]
+    assert first_body["next_cursor"]
+
+    second = await client.get(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}"
+        f"/versions/{version_id}/items",
+        params={"page_size": 2, "cursor": first_body["next_cursor"]},
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    assert [item["question"] for item in second_body["items"]] == ["问题 2", "问题 3"]
+
+    third = await client.get(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}"
+        f"/versions/{version_id}/items",
+        params={"page_size": 2, "cursor": second_body["next_cursor"]},
+    )
+    assert third.status_code == 200
+    third_body = third.json()
+    assert [item["question"] for item in third_body["items"]] == ["问题 4"]
+    assert third_body["next_cursor"] is None
+
+    invalid = await client.get(
+        f"/api/projects/{seed.project_id}/candidate-datasets/{dataset_id}"
+        f"/versions/{version_id}/items",
+        params={"cursor": "not-a-cursor"},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "validation_error"
 
 
 async def _mark_version_parsed(

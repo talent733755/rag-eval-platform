@@ -10,6 +10,7 @@ type DocumentJobResponse = components["schemas"]["DocumentJobResponse"];
 type BatchUploadResponse = components["schemas"]["DocumentBatchUploadResponse"];
 type CandidateDatasetResponse = components["schemas"]["CandidateDatasetResponse"];
 type CandidateDatasetVersionResponse = components["schemas"]["CandidateDatasetVersionResponse"];
+type CandidateItemListResponse = components["schemas"]["CandidateItemListResponse"];
 type CandidateItemResponse = components["schemas"]["CandidateItemResponse"];
 type CandidateReviewRequest = components["schemas"]["CandidateReviewRequest"];
 type CandidateGenerationRequest = components["schemas"]["CandidateGenerationRequest"];
@@ -75,7 +76,7 @@ export type ApiClient = {
   ): Promise<BatchUploadResponse>;
   listCandidateDatasets(projectId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetResponse[]>;
   listCandidateDatasetVersions(projectId: string, datasetId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse[]>;
-  listCandidateItems(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse[]>;
+  listCandidateItems(projectId: string, datasetId: string, versionId: string, options?: { query?: { page_size?: number; cursor?: string }; signal?: AbortSignal }): Promise<CandidateItemListResponse>;
   reviewCandidateItem(projectId: string, datasetId: string, versionId: string, payload: CandidateReviewRequest, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse>;
   publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
@@ -196,8 +197,12 @@ export function createApiClient({
       );
     },
     async listCandidateItems(projectId, datasetId, versionId, options) {
-      return requestJson<CandidateItemResponse[]>(
-        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/items`,
+      const params = new URLSearchParams();
+      if (options?.query?.page_size != null) params.set("page_size", String(options.query.page_size));
+      if (options?.query?.cursor) params.set("cursor", options.query.cursor);
+      const suffix = params.size > 0 ? `?${params.toString()}` : "";
+      return requestJson<CandidateItemListResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/items${suffix}`,
         { method: "GET", signal: options?.signal }, fetchImpl,
       );
     },

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,12 +29,38 @@ from rag_eval_api.models import (
 from rag_eval_api.schemas.candidates import (
     CandidateDatasetResponse,
     CandidateDatasetVersionResponse,
+    CandidateItemListResponse,
     CandidateItemResponse,
     CandidateReviewRequest,
 )
 from rag_eval_api.services.audit import record_audit_event
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["candidate-datasets"])
+
+_MAX_PAGE_SIZE = 200
+
+
+def _cursor_encode(created_at: datetime, resource_id: UUID) -> str:
+    payload = json.dumps(
+        {"created_at": created_at.isoformat(), "id": str(resource_id)},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _cursor_decode(cursor: str) -> tuple[datetime, UUID]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        created_at = datetime.fromisoformat(payload["created_at"])
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return created_at, UUID(payload["id"])
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "validation_error", "message": "Cursor is invalid."}},
+        ) from exc
 
 
 def _not_found() -> HTTPException:
@@ -127,27 +155,49 @@ async def list_candidate_dataset_versions(
 
 @router.get(
     "/candidate-datasets/{dataset_id}/versions/{version_id}/items",
-    response_model=list[CandidateItemResponse],
+    response_model=CandidateItemListResponse,
 )
 async def list_candidate_items(
     dataset_id: UUID,
     version_id: UUID,
+    page_size: int = Query(default=50, ge=1, le=_MAX_PAGE_SIZE),
+    cursor: str | None = None,
     access: ProjectAccess = Depends(require_project_member),
     db_session: AsyncSession = Depends(get_db_session),
-) -> list[CandidateDatasetItem]:
+) -> CandidateItemListResponse:
     await _version(db_session, access, dataset_id, version_id)
+    filters = [
+        CandidateDatasetItem.dataset_id == dataset_id,
+        CandidateDatasetItem.dataset_version_id == version_id,
+        CandidateDatasetItem.organization_id == access.actor.organization_id,
+        CandidateDatasetItem.project_id == access.project.id,
+    ]
+    if cursor is not None:
+        cursor_time, cursor_id = _cursor_decode(cursor)
+        filters.append(
+            or_(
+                CandidateDatasetItem.created_at > cursor_time,
+                and_(
+                    CandidateDatasetItem.created_at == cursor_time,
+                    CandidateDatasetItem.id > cursor_id,
+                ),
+            )
+        )
     result = await db_session.scalars(
         select(CandidateDatasetItem)
         .options(selectinload(CandidateDatasetItem.evidence))
-        .where(
-            CandidateDatasetItem.dataset_id == dataset_id,
-            CandidateDatasetItem.dataset_version_id == version_id,
-            CandidateDatasetItem.organization_id == access.actor.organization_id,
-            CandidateDatasetItem.project_id == access.project.id,
-        )
+        .where(*filters)
         .order_by(CandidateDatasetItem.created_at, CandidateDatasetItem.id)
+        .limit(page_size + 1)
     )
-    return list(result.all())
+    rows = list(result.all())
+    has_next = len(rows) > page_size
+    rows = rows[:page_size]
+    next_cursor = _cursor_encode(rows[-1].created_at, rows[-1].id) if has_next and rows else None
+    return CandidateItemListResponse(
+        items=[CandidateItemResponse.model_validate(row) for row in rows],
+        next_cursor=next_cursor,
+    )
 
 
 @router.post(

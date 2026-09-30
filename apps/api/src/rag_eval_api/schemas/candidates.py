@@ -85,6 +85,13 @@ class CandidateItemResponse(BaseModel):
     evidence: list[CandidateEvidenceResponse]
 
 
+class CandidateItemListResponse(BaseModel):
+    """Bounded, cursor-paginated candidate item collection."""
+
+    items: list[CandidateItemResponse]
+    next_cursor: str | None
+
+
 class CandidateReviewRequest(BaseModel):
     item_id: UUID
     review_status: Literal["accepted", "rejected", "pending"]

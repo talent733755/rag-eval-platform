@@ -1106,6 +1106,16 @@ export interface components {
             /** Seed */
             seed?: number | null;
         };
+        /**
+         * CandidateItemListResponse
+         * @description Bounded, cursor-paginated candidate item collection.
+         */
+        CandidateItemListResponse: {
+            /** Items */
+            items: components["schemas"]["CandidateItemResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** CandidateItemResponse */
         CandidateItemResponse: {
             /** Automatic Checks */
@@ -2532,7 +2542,10 @@ export interface operations {
     };
     list_candidate_items_api_projects__project_id__candidate_datasets__dataset_id__versions__version_id__items_get: {
         parameters: {
-            query?: never;
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
             header?: never;
             path: {
                 dataset_id: string;
@@ -2549,7 +2562,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CandidateItemResponse"][];
+                    "application/json": components["schemas"]["CandidateItemListResponse"];
                 };
             };
             /** @description Validation Error */

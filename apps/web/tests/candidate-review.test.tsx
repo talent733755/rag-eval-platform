@@ -21,7 +21,7 @@ describe("CandidateReviewWorkspace", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: datasetId, name: "产品评测集", status: "draft", updated_at: "2026-01-01T00:00:00Z" }]), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: versionId, dataset_id: datasetId, version_number: 1, status: "review", item_count: 1 }]), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "item-1", question: "问题", reference_answer: "答案", source_version_id: "version-1", confidence: 0.9, review_status: "pending", evidence: [{ id: "evidence-1", ordinal: 0, excerpt: "原文" }] }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "item-1", question: "问题", reference_answer: "答案", source_version_id: "version-1", confidence: 0.9, review_status: "pending", evidence: [{ id: "evidence-1", ordinal: 0, excerpt: "原文" }] }], next_cursor: null }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "item-1", question: "问题", reference_answer: "答案", source_version_id: "version-1", confidence: 0.9, review_status: "accepted", evidence: [{ id: "evidence-1", ordinal: 0, excerpt: "原文" }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: versionId, version_number: 1, status: "published" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchImpl);
