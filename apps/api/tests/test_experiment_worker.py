@@ -514,3 +514,167 @@ async def test_experiment_worker_maintenance_finalizes_cancelling_run_with_expir
         assert run is not None and run.status is ExperimentRunStatus.cancelled
         assert item is not None and item.status is ExperimentRunItemStatus.cancelled
         assert experiment is not None and experiment.status is ExperimentStatus.cancelled
+
+
+class RetrievalTraceAdapter:
+    """Adapter that emits structured retrieval ids into its trace."""
+
+    def __init__(self, retrieved_ids: list[str]) -> None:
+        self.retrieved_ids = retrieved_ids
+
+    def run(self, request: Any) -> AdapterResponse:
+        return AdapterResponse(
+            request_id=request.request_id,
+            answer="检索答案",
+            usage={"latency_ms": 2},
+            trace={
+                "trace_id": f"trace-{request.request_id}",
+                "level": "minimal",
+                "stages": {"retrieve": {"ids": self.retrieved_ids}},
+            },
+        )
+
+
+async def _seed_run_with_evidence(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    gold_chunk_ids: list,
+) -> dict[str, Any]:
+    from rag_eval_api.models import CandidateItemEvidence
+
+    organization_id, project_id = uuid4(), uuid4()
+    experiment_id, adapter_id, candidate_id, run_id, run_item_id, source_version = (
+        uuid4() for _ in range(6)
+    )
+    experiment = Experiment(
+        id=experiment_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        name="检索实验",
+        idempotency_key=f"retrieval-{uuid4()}",
+        status=ExperimentStatus.queued,
+        dataset_version_id=uuid4(),
+        adapter_config_id=adapter_id,
+        model_provider_id=uuid4(),
+        metric_versions={"recall@5": "retrieval-v1"},
+        parameters={},
+        random_seed=1,
+        configuration_snapshot={},
+        environment_hash="d" * 64,
+        total_units=1,
+        created_by=uuid4(),
+    )
+    adapter = AdapterConfig(
+        id=adapter_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        name="检索 Adapter",
+        kind=AdapterKind.http,
+        endpoint="https://adapter.example.test",
+        adapter_version="adapter-v2",
+        trace_level="minimal",
+        timeout_seconds=2,
+        retry_count=0,
+        enabled=True,
+        last_test_status=AdapterTestStatus.succeeded,
+    )
+    candidate = CandidateDatasetItem(
+        id=candidate_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        dataset_id=uuid4(),
+        dataset_version_id=None,
+        generation_config_id=uuid4(),
+        source_version_id=source_version,
+        question="检索问题",
+        question_type="factual",
+        reference_answer="参考答案",
+        confidence=1,
+        automatic_checks={},
+        review_status=CandidateReviewStatus.accepted,
+        provenance={},
+    )
+    evidence = [
+        CandidateItemEvidence(
+            organization_id=organization_id,
+            project_id=project_id,
+            item_id=candidate_id,
+            source_version_id=source_version,
+            chunk_id=chunk_id,
+            ordinal=index,
+        )
+        for index, chunk_id in enumerate(gold_chunk_ids)
+    ]
+    run = ExperimentRun(
+        id=run_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        status=ExperimentRunStatus.queued,
+        total_units=1,
+        created_by=uuid4(),
+    )
+    run_item = ExperimentRunItem(
+        id=run_item_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        run_id=run_id,
+        candidate_item_id=candidate_id,
+    )
+    async with session_factory() as session:
+        session.add_all([experiment, adapter, candidate, *evidence, run, run_item])
+        await session.commit()
+    return {"run_id": run_id, "run_item_id": run_item_id, "gold_chunk_ids": gold_chunk_ids}
+
+
+@pytest.mark.asyncio
+async def test_worker_records_retrieval_miss_for_succeeded_item(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    gold = uuid4()
+    ids = await _seed_run_with_evidence(session_factory, gold_chunk_ids=[gold])
+    adapter = RetrievalTraceAdapter(["unrelated-chunk"])
+    worker = ExperimentWorker(
+        session_factory=session_factory,
+        adapter_factory=lambda config: adapter,
+        worker_id="experiment-worker-retrieval-miss",
+        lease_ttl=timedelta(seconds=30),
+    )
+
+    result = await worker.process_batch(1)
+
+    assert result.succeeded == 1
+    async with session_factory() as session:
+        from rag_eval_api.models import FailureCase
+
+        failure = await session.scalar(
+            select(FailureCase).where(FailureCase.run_item_id == ids["run_item_id"])
+        )
+        assert failure is not None
+        assert failure.code == "retrieval_miss"
+
+
+@pytest.mark.asyncio
+async def test_worker_records_retrieval_hit_without_failure(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    gold = uuid4()
+    ids = await _seed_run_with_evidence(session_factory, gold_chunk_ids=[gold])
+    adapter = RetrievalTraceAdapter([str(gold)])
+    worker = ExperimentWorker(
+        session_factory=session_factory,
+        adapter_factory=lambda config: adapter,
+        worker_id="experiment-worker-retrieval-hit",
+        lease_ttl=timedelta(seconds=30),
+    )
+
+    result = await worker.process_batch(1)
+
+    assert result.succeeded == 1
+    async with session_factory() as session:
+        from rag_eval_api.models import FailureCase
+
+        failure = await session.scalar(
+            select(FailureCase).where(FailureCase.run_item_id == ids["run_item_id"])
+        )
+        assert failure is None

@@ -22,8 +22,13 @@ completed Run. Each row records `value`, optional `numerator`/`denominator`,
 value must carry `missing_reason`; it is not converted to zero.
 
 The initial `metrics-v1` calculator provides success, failure, completion,
-non-empty-answer, Trace coverage, latency and token engineering metrics. The
-retrieval metrics remain explicitly missing until retrieval evidence is
-persisted by the adapter/Trace pipeline. Recalculating a completed Run is
+non-empty-answer, Trace coverage, latency and token engineering metrics.
+Retrieval metrics (`recall@5`, `precision@5`, `hit_rate@5`, `mrr`, `ndcg@5`) are
+computed when the run item's persisted trace carries structured retrieval
+evidence per the [`adapter-v2`](adapter-v2.md) `ids` convention and the
+candidate item has gold evidence chunk ids to join against. When the trace has
+no structured retrieval stage, the metric is missing with
+`retrieval_evidence_unavailable`; when the candidate has no gold evidence, it is
+missing with `no_relevant_evidence`. Recalculating a completed Run is
 idempotent: an existing `(run_id, scope_key, metric_definition_id)` result is
 never updated or deleted.

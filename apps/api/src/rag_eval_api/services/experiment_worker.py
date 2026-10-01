@@ -18,6 +18,7 @@ from rag_eval_api.adapters.errors import AdapterError
 from rag_eval_api.models import (
     AdapterConfig,
     CandidateDatasetItem,
+    CandidateItemEvidence,
     Experiment,
     ExperimentRun,
     ExperimentRunAttempt,
@@ -28,6 +29,9 @@ from rag_eval_api.models import (
 )
 from rag_eval_api.services.failure_cases import persist_failure_case
 from rag_eval_api.services.metric_calculation import calculate_completed_run_metrics
+from rag_eval_api.services.retrieval_evidence import (
+    extract_retrieved_chunk_ids_from_envelope,
+)
 from rag_eval_api.services.trace_persistence import persist_trace
 from rag_eval_api.storage.protocol import BlobStore
 
@@ -528,7 +532,29 @@ class ExperimentWorker:
                         )
                     )
                 self._accumulate_usage(run, attempts)
-                if final_status is ExperimentRunItemStatus.failed:
+                retrieved_ids = (
+                    extract_retrieved_chunk_ids_from_envelope(response.trace.stages)
+                    if response is not None and response.trace is not None
+                    else []
+                )
+                relevant_ids = list(
+                    (
+                        await session.scalars(
+                            select(CandidateItemEvidence.chunk_id).where(
+                                CandidateItemEvidence.item_id == item.candidate_item_id,
+                                CandidateItemEvidence.organization_id == claim.organization_id,
+                                CandidateItemEvidence.project_id == claim.project_id,
+                            )
+                        )
+                    ).all()
+                )
+                relevant_id_strs = [str(chunk_id) for chunk_id in relevant_ids]
+                retrieval_miss = bool(relevant_id_strs and retrieved_ids) and not (
+                    set(retrieved_ids) & set(relevant_id_strs)
+                )
+                if final_status is ExperimentRunItemStatus.failed or (
+                    final_status is ExperimentRunItemStatus.succeeded and retrieval_miss
+                ):
                     await persist_failure_case(
                         session,
                         organization_id=claim.organization_id,
@@ -539,6 +565,8 @@ class ExperimentWorker:
                         attempt_number=claim.attempt_number,
                         error_code=error_code,
                         trace_id=persisted_trace_id,
+                        retrieved_ids=retrieved_ids,
+                        relevant_ids=relevant_id_strs,
                     )
                 run.completed_units += 1
                 if final_status is ExperimentRunItemStatus.succeeded:

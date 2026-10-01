@@ -3,6 +3,7 @@
 - [`document-ingestion-v1.md`](document-ingestion-v1.md)：文档上传、版本、解析任务和 Worker 状态。
 - [`candidate-generation-v1.md`](candidate-generation-v1.md)：候选生成请求、证据和 Provider 错误。
 - [`adapter-v1.md`](adapter-v1.md)：RAG Adapter 请求、响应、引用、用量和 Trace。
+- [`adapter-v2.md`](adapter-v2.md)：adapter-v1 的兼容超集，约定结构化检索 Trace 阶段（召回 chunk ids），驱动召回指标与 `retrieval_miss` 诊断。
 - [`metrics-v1.md`](metrics-v1.md)：指标纯函数、缺失语义、版本和结果持久化契约。
 - [`experiment-v1.md`](experiment-v1.md)：实验草稿启动校验和不可变快照边界。
 - [`trace-v1.md`](trace-v1.md)：脱敏 Trace 阶段、Blob 引用、失败分类和查询边界。

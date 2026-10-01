@@ -106,7 +106,9 @@ class ScriptedAdapter:
             trace={
                 "trace_id": f"trace-{request.request_id}",
                 "level": "minimal",
-                "stages": {"retrieve": {"ids": ["chunk-1"]}},
+                # This happy-path fake does not expose structured retrieval evidence;
+                # the platform must not attribute a retrieval miss in that case.
+                "stages": {"generate": {"text": "answer"}},
             },
         )
 

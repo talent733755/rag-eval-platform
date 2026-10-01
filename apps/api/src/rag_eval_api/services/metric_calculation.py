@@ -99,40 +99,40 @@ METRIC_SPECS: dict[str, MetricSpec] = {
         "recall@5",
         "Recall@5",
         "retrieval",
-        "Retrieval recall at five; requires persisted retrieval evidence.",
-        "retrieval_unavailable",
+        "Retrieval recall at five against gold evidence.",
+        "retrieval_recall",
         "ratio",
     ),
     "precision@5": MetricSpec(
         "precision@5",
         "Precision@5",
         "retrieval",
-        "Retrieval precision at five; requires persisted retrieval evidence.",
-        "retrieval_unavailable",
+        "Retrieval precision at five against gold evidence.",
+        "retrieval_precision",
         "ratio",
     ),
     "hit_rate@5": MetricSpec(
         "hit_rate@5",
         "HitRate@5",
         "retrieval",
-        "Retrieval hit rate at five; requires persisted retrieval evidence.",
-        "retrieval_unavailable",
+        "Retrieval hit rate at five against gold evidence.",
+        "retrieval_hit_rate",
         "ratio",
     ),
     "mrr": MetricSpec(
         "mrr",
         "MRR",
         "retrieval",
-        "Mean reciprocal rank; requires persisted retrieval evidence.",
-        "retrieval_unavailable",
+        "Mean reciprocal rank against gold evidence.",
+        "retrieval_mrr",
         "ratio",
     ),
     "ndcg@5": MetricSpec(
         "ndcg@5",
         "nDCG@5",
         "retrieval",
-        "Normalized discounted cumulative gain at five; requires persisted retrieval evidence.",
-        "retrieval_unavailable",
+        "Normalized discounted cumulative gain at five against gold evidence.",
+        "retrieval_ndcg",
         "ratio",
     ),
 }
@@ -201,7 +201,44 @@ async def ensure_metric_definitions(
     return definitions
 
 
-def _sample_value(spec: MetricSpec, item: ExperimentRunItem) -> _Value:
+def _retrieval_value(spec: MetricSpec, relevant_ids: list[str], retrieved_ids: list[str]) -> _Value:
+    """Compute a retrieval metric from gold evidence and persisted trace ids."""
+
+    if not retrieved_ids:
+        return _Value(None, None, None, "retrieval_evidence_unavailable")
+    if not relevant_ids:
+        return _Value(None, None, None, "no_relevant_evidence")
+    from rag_eval_api.metrics.retrieval import (
+        hit_rate_at_k,
+        mean_reciprocal_rank,
+        ndcg_at_k,
+        precision_at_k,
+        recall_at_k,
+    )
+
+    k = 5
+    if spec.kind == "retrieval_mrr":
+        value = mean_reciprocal_rank(retrieved_ids, relevant_ids)
+    elif spec.kind == "retrieval_recall":
+        value = recall_at_k(retrieved_ids, relevant_ids, k)
+    elif spec.kind == "retrieval_precision":
+        value = precision_at_k(retrieved_ids, relevant_ids, k)
+    elif spec.kind == "retrieval_hit_rate":
+        value = hit_rate_at_k(retrieved_ids, relevant_ids, k)
+    else:
+        value = ndcg_at_k(retrieved_ids, relevant_ids, k)
+    if value is None:
+        return _Value(None, None, None, "no_relevant_evidence")
+    return _Value(float(value), float(value), 1.0)
+
+
+def _sample_value(
+    spec: MetricSpec,
+    item: ExperimentRunItem,
+    *,
+    relevant_ids: list[str] | None = None,
+    retrieved_ids: list[str] | None = None,
+) -> _Value:
     status = item.status
     if spec.kind == "binary_success":
         return _Value(
@@ -246,6 +283,14 @@ def _sample_value(spec: MetricSpec, item: ExperimentRunItem) -> _Value:
         return _Value(float(total), float(total), 1.0)
     if spec.kind == "retrieval_unavailable":
         return _Value(None, None, None, "retrieval_evidence_unavailable")
+    if spec.kind in {
+        "retrieval_recall",
+        "retrieval_precision",
+        "retrieval_hit_rate",
+        "retrieval_mrr",
+        "retrieval_ndcg",
+    }:
+        return _retrieval_value(spec, relevant_ids or [], retrieved_ids or [])
     return _Value(None, None, None, "metric_not_implemented")
 
 
@@ -260,7 +305,37 @@ def _distribution(values: list[float]) -> dict[str, object]:
     }
 
 
-async def calculate_run_metrics(session: AsyncSession, run: ExperimentRun) -> int:
+async def _gold_evidence_by_item(
+    session: AsyncSession, run: ExperimentRun, items: list[ExperimentRunItem]
+) -> dict[UUID, list[str]]:
+    """Load gold evidence chunk ids keyed by run item id (tenant-scoped)."""
+
+    from rag_eval_api.models import CandidateItemEvidence
+
+    candidate_ids = [item.candidate_item_id for item in items]
+    if not candidate_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(CandidateItemEvidence.item_id, CandidateItemEvidence.chunk_id).where(
+                CandidateItemEvidence.item_id.in_(candidate_ids),
+                CandidateItemEvidence.organization_id == run.organization_id,
+                CandidateItemEvidence.project_id == run.project_id,
+            )
+        )
+    ).all()
+    by_candidate: dict[UUID, list[str]] = {}
+    for candidate_item_id, chunk_id in rows:
+        by_candidate.setdefault(candidate_item_id, []).append(str(chunk_id))
+    return {item.id: by_candidate.get(item.candidate_item_id, []) for item in items}
+
+
+async def calculate_run_metrics(
+    session: AsyncSession,
+    run: ExperimentRun,
+    *,
+    retrieved_by_item: dict[UUID, list[str]] | None = None,
+) -> int:
     """Append run and sample results; a repeated call is a no-op."""
 
     if run.status not in {
@@ -307,6 +382,8 @@ async def calculate_run_metrics(session: AsyncSession, run: ExperimentRun) -> in
             )
         ).all()
     )
+    retrieved_by_item = retrieved_by_item or {}
+    relevant_by_item = await _gold_evidence_by_item(session, run, items)
     created = 0
     for key, version in experiment.metric_versions.items():
         definition = definitions[(key, version)]
@@ -321,7 +398,15 @@ async def calculate_run_metrics(session: AsyncSession, run: ExperimentRun) -> in
                 "unknown",
             ),
         )
-        sample_values = [_sample_value(spec, item) for item in items]
+        sample_values = [
+            _sample_value(
+                spec,
+                item,
+                relevant_ids=relevant_by_item.get(item.id, []),
+                retrieved_ids=retrieved_by_item.get(item.id, []),
+            )
+            for item in items
+        ]
         available = [value.value for value in sample_values if value.value is not None]
         numerator_values = [
             value.numerator for value in sample_values if value.numerator is not None
@@ -403,9 +488,27 @@ async def calculate_completed_run_metrics(
 ) -> int:
     """Calculate metrics in a short transaction after a worker terminal transition."""
 
+    from rag_eval_api.models import PersistedTrace
+    from rag_eval_api.services.retrieval_evidence import extract_retrieved_chunk_ids
+
     async with session_factory() as session:
         async with session.begin():
             run = await session.scalar(select(ExperimentRun).where(ExperimentRun.id == run_id))
             if run is None:
                 return 0
-            return await calculate_run_metrics(session, run)
+            traces = list(
+                (
+                    await session.scalars(
+                        select(PersistedTrace).where(
+                            PersistedTrace.run_id == run_id,
+                            PersistedTrace.organization_id == run.organization_id,
+                            PersistedTrace.project_id == run.project_id,
+                        )
+                    )
+                ).all()
+            )
+            retrieved_by_item: dict[UUID, list[str]] = {
+                trace.run_item_id: extract_retrieved_chunk_ids(trace.stages or [])
+                for trace in traces
+            }
+            return await calculate_run_metrics(session, run, retrieved_by_item=retrieved_by_item)
