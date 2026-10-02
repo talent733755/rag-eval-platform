@@ -101,7 +101,16 @@ def test_production_settings_reject_default_secret() -> None:
     from rag_eval_api.config import Settings
 
     try:
-        Settings.model_validate({"APP_ENV": "production", "SECRET_KEY": "development-only-secret"})
+        # Isolate from the repository .env so only the secret-key guard is exercised;
+        # DEV_ACTOR_ID is unset to keep the production env-var guard from firing first.
+        Settings.model_validate(
+            {
+                "APP_ENV": "production",
+                "SECRET_KEY": "development-only-secret",
+                "DEV_ACTOR_ID": None,
+                "_env_file": None,
+            }
+        )
     except ValueError as error:
         assert "SECRET_KEY" in str(error)
     else:

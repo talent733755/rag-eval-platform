@@ -1,13 +1,15 @@
-"""Jev judge: TypeSafe System One decision model over HTTP.
+"""Jev judge: TypeSafe System One decision model over its real ``/systemone`` contract.
 
-Jev is a fast (<50 ms) deterministic decision model exposing a `classify(input,
-labels, confidence_threshold)` shape. This client adapts answer-correctness judging
-onto that contract. It is fully opt-in (requires an explicit base URL and API key),
-sends bounded, secret-stripped input, enforces a timeout, and raises
-`JudgeUnavailableError` on any unsafe outcome so the worker can fall back.
+Jev exposes ``POST {base_url}/systemone`` with a body of ``{model, state, questions}``.
+Each question is a typed object; for answer-correctness judging we use a single
+``choice`` question with the two options ``correct`` / ``incorrect`` and a matching
+``criteria`` map. Jev answers each question with ``{choice, confidence, probabilities}``.
 
-Jev is NEVER golden truth. Low-confidence verdicts are marked `needs_review` so a
-human confirms them before they affect downstream gates.
+The verdict is NEVER golden truth: a low confidence marks the verdict ``needs_review``
+so a human confirms it before it affects downstream gates. The client is fully opt-in
+(requires an explicit base URL), sends bounded secret-stripped input, enforces a
+timeout, and raises ``JudgeUnavailableError`` on any unsafe outcome so the worker can
+fall back to a missing metric rather than fabricating a label.
 """
 
 from __future__ import annotations
@@ -24,9 +26,11 @@ from rag_eval_api.judges.protocol import (
     JudgeVerdict,
 )
 
-CORRECT_LABEL = "correct"
-INCORRECT_LABEL = "incorrect"
-MAX_CLASSIFY_INPUT_CHARS = 32_000
+CORRECT_OPTION = "correct"
+INCORRECT_OPTION = "incorrect"
+QUESTION_KEY = "answer_correctness"
+MAX_STATE_CHARS = 32_000
+DEFAULT_JEV_MODEL = "jev-latest"
 
 
 class _Transport(Protocol):
@@ -53,16 +57,38 @@ class _UrllibTransport:
         return result
 
 
-def _build_classify_prompt(request: JudgeRequest) -> str:
+def _build_state(request: JudgeRequest) -> str:
+    """Build the bounded ``state`` context string from the judging inputs."""
+
     parts = [
-        "判定下面生成的回答是否与参考答案一致。只输出 correct 或 incorrect。",
         f"问题：{request.question}",
         f"参考答案：{request.reference_answer or ''}",
         f"生成答案：{request.answer}",
     ]
     if request.gold_evidence:
         parts.append("标准证据：" + " | ".join(request.gold_evidence))
-    return "\n".join(parts)[:MAX_CLASSIFY_INPUT_CHARS]
+    return "\n".join(parts)[:MAX_STATE_CHARS]
+
+
+def _build_payload(request: JudgeRequest, model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "state": _build_state(request),
+        "questions": {
+            QUESTION_KEY: {
+                "type": "choice",
+                "question": "生成答案与参考答案是否语义一致（正确回答了问题）",
+                "options": {
+                    CORRECT_OPTION: "一致：生成答案在语义上等价于参考答案，正确回答了问题",
+                    INCORRECT_OPTION: "不一致：生成答案与参考答案矛盾、缺失关键信息或答非所问",
+                },
+                "criteria": {
+                    CORRECT_OPTION: "生成答案与参考答案语义等价，且正确回答了问题",
+                    INCORRECT_OPTION: "生成答案与参考答案矛盾、缺失关键信息或答非所问",
+                },
+            }
+        },
+    }
 
 
 def _parse_verdict(
@@ -73,14 +99,20 @@ def _parse_verdict(
     latency_ms: int,
     threshold: float,
 ) -> JudgeVerdict:
-    probabilities = payload.get("probabilities")
-    if not isinstance(probabilities, dict):
-        raise ValueError("jev classify response is missing probabilities")
-    correct_raw = probabilities.get(CORRECT_LABEL)
-    if not isinstance(correct_raw, int | float):
-        raise ValueError("jev classify response is missing the correct probability")
-    confidence = float(correct_raw)
-    label = JudgeLabel.correct if confidence >= threshold else JudgeLabel.incorrect
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        raise ValueError("jev systemone response is missing answers")
+    answer = answers.get(QUESTION_KEY)
+    if not isinstance(answer, dict):
+        raise ValueError("jev systemone response is missing the correctness answer")
+    choice = answer.get("choice")
+    confidence_raw = answer.get("confidence")
+    if not isinstance(choice, str) or choice not in (CORRECT_OPTION, INCORRECT_OPTION):
+        raise ValueError("jev systemone response has an unexpected choice")
+    if not isinstance(confidence_raw, int | float):
+        raise ValueError("jev systemone response is missing confidence")
+    confidence = float(confidence_raw)
+    label = JudgeLabel.correct if choice == CORRECT_OPTION else JudgeLabel.incorrect
     return JudgeVerdict(
         label=label,
         confidence=round(min(1.0, max(0.0, confidence)), 4),
@@ -93,7 +125,7 @@ def _parse_verdict(
 
 
 class JevJudge:
-    """HTTP client adapting answer-correctness onto Jev's classify contract."""
+    """HTTP client adapting answer-correctness onto Jev's real /systemone contract."""
 
     name = "jev"
     version = "judge-v1"
@@ -105,6 +137,7 @@ class JevJudge:
         api_key: str | None,
         confidence_threshold: float = 0.7,
         timeout_seconds: int = 10,
+        model: str = DEFAULT_JEV_MODEL,
         transport: _Transport | None = None,
     ) -> None:
         if not base_url.strip():
@@ -115,6 +148,7 @@ class JevJudge:
         self._api_key = api_key
         self._threshold = confidence_threshold
         self._timeout = timeout_seconds
+        self._model = model
         self._transport = transport or _UrllibTransport()
 
     def judge(self, request: JudgeRequest) -> JudgeVerdict:
@@ -122,15 +156,10 @@ class JevJudge:
         headers: dict[str, str] = {}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
-        body = {
-            "input": _build_classify_prompt(request),
-            "labels": [CORRECT_LABEL, INCORRECT_LABEL],
-            "confidence_threshold": self._threshold,
-        }
         try:
             payload = self._transport.post(
-                f"{self._base_url}/classify",
-                payload=body,
+                f"{self._base_url}/systemone",
+                payload=_build_payload(request, self._model),
                 headers=headers,
                 timeout=self._timeout,
             )
