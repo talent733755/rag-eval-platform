@@ -357,3 +357,175 @@ def test_empty_dev_actor_id_is_treated_as_unset() -> None:
     )
 
     assert settings.dev_actor_id is None
+
+
+@pytest.mark.asyncio
+async def test_oidc_resolves_actor_via_jwks_rs256(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+    from rag_eval_api.auth.context import OIDC_VERIFIER_STATE_KEY
+    from rag_eval_api.auth.oidc import OidcVerifier, jwk_from_rsa_public_key
+
+    application, client, session_factory = authentication_environment
+
+    issuer = "https://idp.example.test"
+    audience = "rag-eval-api"
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = jwk_from_rsa_public_key(private.public_key(), kid="oidc-key-1")
+
+    application.state.settings.auth_mode = "oidc"
+    application.state.settings.auth_oidc_jwks_url = "https://idp.example.test/jwks.json"
+    application.state.settings.auth_oidc_issuer = issuer
+    application.state.settings.auth_oidc_audience = audience
+    application.state.settings.auth_jwt_leeway_seconds = 30
+    setattr(
+        application.state,
+        OIDC_VERIFIER_STATE_KEY,
+        OidcVerifier(
+            jwks_source=lambda: [jwk], issuer=issuer, audience=audience, leeway_seconds=30
+        ),
+    )
+
+    async with session_factory() as session:
+        organization = Organization(id=ORGANIZATION_ID, name="OIDC Org", slug="oidc-org")
+        project = Project(
+            id=PROJECT_ID, name="OIDC project", slug="oidc-project", organization_id=ORGANIZATION_ID
+        )
+        session.add_all(
+            [
+                organization,
+                project,
+                Membership(
+                    organization_id=ORGANIZATION_ID,
+                    project_id=project.id,
+                    user_id=ACTOR_ID,
+                    role=MembershipRole.admin,
+                ),
+            ]
+        )
+        await session.commit()
+
+    def encode(value: object) -> str:
+        raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    header = encode({"alg": "RS256", "typ": "JWT", "kid": "oidc-key-1"})
+    body = encode(
+        {
+            "sub": str(ACTOR_ID),
+            "organization_id": str(ORGANIZATION_ID),
+            "iss": issuer,
+            "aud": audience,
+            "exp": int(time.time()) + 300,
+        }
+    )
+    signing_input = f"{header}.{body}".encode()
+    signature = private.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    token = f"{header}.{body}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
+
+    response = await client.get("/api/projects", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert any(project["slug"] == "oidc-project" for project in response.json())
+
+
+@pytest.mark.asyncio
+async def test_oidc_rejects_hs256_downgrade(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    from rag_eval_api.auth.context import OIDC_VERIFIER_STATE_KEY
+    from rag_eval_api.auth.oidc import OidcVerifier
+
+    application, client, _ = authentication_environment
+    application.state.settings.auth_mode = "oidc"
+    setattr(
+        application.state,
+        OIDC_VERIFIER_STATE_KEY,
+        OidcVerifier(
+            jwks_source=lambda: [],
+            issuer="https://idp.example.test",
+            audience="rag-eval-api",
+            leeway_seconds=30,
+        ),
+    )
+    token = encode_hs256_token(
+        {
+            "sub": str(ACTOR_ID),
+            "organization_id": str(ORGANIZATION_ID),
+            "iss": "https://idp.example.test",
+            "aud": "rag-eval-api",
+            "exp": int(time.time()) + 300,
+        }
+    )
+
+    response = await client.get("/api/projects", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_token"
+
+
+def test_oidc_mode_requires_jwks_url_and_https() -> None:
+    base = {
+        "APP_ENV": "development",
+        "AUTH_MODE": "oidc",
+        "AUTH_OIDC_ISSUER": "https://idp.example.test",
+        "AUTH_OIDC_AUDIENCE": "rag-eval-api",
+        "_env_file": None,
+    }
+    with pytest.raises(ValueError, match="AUTH_OIDC_JWKS_URL"):
+        Settings.model_validate(base)
+    with pytest.raises(ValueError, match="https"):
+        Settings.model_validate({**base, "AUTH_OIDC_JWKS_URL": "http://idp.example.test/jwks"})
+
+
+def test_oidc_mode_requires_issuer_and_audience() -> None:
+    base = {
+        "APP_ENV": "development",
+        "AUTH_MODE": "oidc",
+        "AUTH_OIDC_JWKS_URL": "https://idp.example.test/jwks.json",
+        "_env_file": None,
+    }
+    with pytest.raises(ValueError, match="AUTH_OIDC_ISSUER"):
+        Settings.model_validate(base)
+
+
+@pytest.mark.asyncio
+async def test_permission_denied_is_audited_best_effort(
+    authentication_environment: tuple[FastAPI, httpx.AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    from sqlalchemy import select
+
+    from rag_eval_api.models import AuditEvent
+    from rag_eval_api.services.audit import AUTH_FAILURE_ACTOR_ID
+
+    application, client, session_factory = authentication_environment
+    configure_jwt(application)
+    application.state.db_session_factory = session_factory
+
+    # The organization exists but the actor holds no membership in it.
+    async with session_factory() as session:
+        session.add(Organization(id=ORGANIZATION_ID, name="Audit Org", slug="audit-org"))
+        await session.commit()
+
+    # Token is validly signed for an organization the actor does not belong to.
+    token = encode_hs256_token(
+        {
+            "sub": str(ACTOR_ID),
+            "organization_id": str(ORGANIZATION_ID),
+            "iss": "https://issuer.example",
+            "aud": "rag-eval-web",
+            "exp": int(time.time()) + 300,
+        }
+    )
+    response = await client.get("/api/projects", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+
+    async with session_factory() as session:
+        event = await session.scalar(select(AuditEvent).where(AuditEvent.action == "auth.failed"))
+        assert event is not None
+        assert event.actor_id == AUTH_FAILURE_ACTOR_ID
+        assert event.organization_id == ORGANIZATION_ID
+        assert event.metadata_json["failure_code"] == "permission_denied"

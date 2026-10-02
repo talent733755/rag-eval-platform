@@ -30,6 +30,13 @@ payload 先脱敏，64 KiB 以内才内联，较大内容使用私有 BlobStore 
 可通过幂等重算接口补写派生结果。不要直接修改或删除 experiment、metric、Trace、failure
 和 regression history；这些表由应用和 PostgreSQL append-only 边界共同保护。
 
-当前已知限制：完整 OIDC/JWKS provider、非对称密钥轮换、登录/刷新会话和撤销策略尚未接入；成本指标尚无费率契约；检索指标等待 Adapter 检索
-证据接入。API/Worker/Web 使用 pinned digest 的 Amazon ECR Public 官方镜像源；如所在
-网络无法访问 `public.ecr.aws`，需为 Docker 配置可访问的等价镜像代理，并保持相同内容 digest。
+## 私有部署与生产认证
+
+生产环境必须关闭开发 actor（`DEV_ACTOR_ID` 仅在 `APP_ENV=development` 下允许），并启用一种真实认证边界：
+
+- **HS256 JWT（`AUTH_MODE=jwt_hs256`）**：设置 `AUTH_JWT_SECRET`（≥32 字符）、`AUTH_JWT_ISSUER`、`AUTH_JWT_AUDIENCE`。适用于平台自行签发令牌。
+- **OIDC / RS256（`AUTH_MODE=oidc`）**：设置 `AUTH_OIDC_JWKS_URL`（必须 https）、`AUTH_OIDC_ISSUER`、`AUTH_OIDC_AUDIENCE`；平台从该 URL 拉取 JWKS 公钥并缓存 `AUTH_OIDC_JWKS_CACHE_SECONDS`，未知 key id 触发单次刷新以支持非对称密钥轮换。适用于接入企业 IdP（如 Entra ID、Keycloak、Auth0）。
+
+认证失败（无效令牌、无组织权限）会以 `auth.failed` 审计事件 best-effort 记录到组织边界，永不阻塞请求。生产镜像使用 pinned digest 的 Amazon ECR Public 官方镜像源；如所在网络无法访问 `public.ecr.aws`，需为 Docker 配置可访问的等价镜像代理，并保持相同内容 digest。
+
+当前已知限制：登录/刷新会话与撤销策略（refresh token、session revocation）尚未接入，Bearer 令牌无服务端会话状态；成本指标尚无费率契约。

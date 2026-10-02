@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_eval_api.auth.jwt import InvalidTokenError, verify_hs256_token
 from rag_eval_api.db import get_db_session
 from rag_eval_api.models import Membership
+from rag_eval_api.services.audit import record_auth_failure
+
+OIDC_VERIFIER_STATE_KEY = "oidc_verifier"
 
 AUTHENTICATION_NOT_CONFIGURED = HTTPException(
     status_code=501,
@@ -50,6 +53,44 @@ class RequestActor:
     organization_id: UUID
 
 
+async def _resolve_membership_actor(
+    request: Request, db_session: AsyncSession, user_id: UUID, organization_id: UUID
+) -> RequestActor:
+    membership_id = (
+        await db_session.execute(
+            select(Membership.id)
+            .where(
+                Membership.user_id == user_id,
+                Membership.organization_id == organization_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if membership_id is None:
+        session_factory = getattr(request.app.state, "db_session_factory", None)
+        if session_factory is not None:
+            await record_auth_failure(
+                session_factory,
+                organization_id=organization_id,
+                failure_code="permission_denied",
+                endpoint=str(request.url.path),
+            )
+        raise authentication_error(
+            "permission_denied",
+            "You do not have permission to access this organization.",
+            status_code=403,
+        )
+    return RequestActor(user_id=user_id, organization_id=organization_id)
+
+
+def _bearer_token(request: Request) -> str:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise authentication_error("authentication_required", "Bearer authentication is required.")
+    return token.strip()
+
+
 async def get_current_actor(
     request: Request,
     db_session: AsyncSession = Depends(get_db_session),
@@ -63,35 +104,21 @@ async def get_current_actor(
 
     settings = request.app.state.settings
     if settings.auth_mode == "jwt_hs256":
-        authorization = request.headers.get("authorization", "")
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not token.strip():
-            raise authentication_error(
-                "authentication_required", "Bearer authentication is required."
-            )
         try:
-            user_id, organization_id = verify_hs256_token(token.strip(), settings)
-        except InvalidTokenError as exc:
-            del exc
+            user_id, organization_id = verify_hs256_token(_bearer_token(request), settings)
+        except InvalidTokenError:
             raise authentication_error("invalid_token", "The access token is invalid.")
+        return await _resolve_membership_actor(request, db_session, user_id, organization_id)
 
-        membership_id = (
-            await db_session.execute(
-                select(Membership.id)
-                .where(
-                    Membership.user_id == user_id,
-                    Membership.organization_id == organization_id,
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if membership_id is None:
-            raise authentication_error(
-                "permission_denied",
-                "You do not have permission to access this organization.",
-                status_code=403,
-            )
-        return RequestActor(user_id=user_id, organization_id=organization_id)
+    if settings.auth_mode == "oidc":
+        verifier = getattr(request.app.state, OIDC_VERIFIER_STATE_KEY, None)
+        if verifier is None:
+            raise AUTHENTICATION_NOT_CONFIGURED
+        try:
+            user_id, organization_id = verifier.verify(_bearer_token(request))
+        except InvalidTokenError:
+            raise authentication_error("invalid_token", "The access token is invalid.")
+        return await _resolve_membership_actor(request, db_session, user_id, organization_id)
 
     if settings.app_env != "development" or settings.dev_actor_id is None:
         raise AUTHENTICATION_NOT_CONFIGURED

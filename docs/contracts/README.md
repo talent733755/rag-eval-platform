@@ -9,6 +9,7 @@
 - [`trace-v1.md`](trace-v1.md)：脱敏 Trace 阶段、Blob 引用、失败分类和查询边界。
 - [`judges-v1.md`](judges-v1.md)：可插拔判定（Judge）契约、置信度回流人工与 `answer_correctness` 指标语义。
 - [`quality-gate-v1.md`](quality-gate-v1.md)：CI 质量门契约——确定性阈值判定的请求/响应、红线、reason 码与 GitHub Action 封装。
+- [`authentication-v1.md`](authentication-v1.md)：可替换认证边界（HS256/OIDC-RS256）、JWKS 轮换、红线与认证失败审计。
 
 Adapter 配置 API 使用项目权限：成员可读，编辑者可改，管理员可删。Python Adapter 的
 `entrypoint_ref` 只能解析部署中已安装且唯一的 `rag_eval_adapter` entry point。连接测试会产生一次

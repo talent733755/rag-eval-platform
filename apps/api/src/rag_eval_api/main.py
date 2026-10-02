@@ -168,6 +168,28 @@ def create_app(settings: Settings | None = None, blob_store: BlobStore | None = 
         lifespan=lifespan,
     )
     application.state.settings = configured_settings
+    if configured_settings.auth_mode == "oidc":
+        from rag_eval_api.auth.context import OIDC_VERIFIER_STATE_KEY
+        from rag_eval_api.auth.jwks import HttpJwksFetcher
+        from rag_eval_api.auth.oidc import OidcVerifier
+
+        assert configured_settings.auth_oidc_jwks_url is not None
+        assert configured_settings.auth_oidc_issuer is not None
+        assert configured_settings.auth_oidc_audience is not None
+        jwks_fetcher = HttpJwksFetcher(
+            configured_settings.auth_oidc_jwks_url,
+            cache_seconds=configured_settings.auth_oidc_jwks_cache_seconds,
+        )
+        setattr(
+            application.state,
+            OIDC_VERIFIER_STATE_KEY,
+            OidcVerifier(
+                jwks_source=jwks_fetcher.fetch,
+                issuer=configured_settings.auth_oidc_issuer,
+                audience=configured_settings.auth_oidc_audience,
+                leeway_seconds=configured_settings.auth_jwt_leeway_seconds,
+            ),
+        )
     if blob_store is not None:
         application.state.blob_store = blob_store
         application.state.blob_store_owned = False

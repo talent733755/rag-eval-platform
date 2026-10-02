@@ -343,7 +343,7 @@ class Settings(BaseSettings):
     ] = None
 
     auth_mode: Annotated[
-        Literal["disabled", "jwt_hs256"],
+        Literal["disabled", "jwt_hs256", "oidc"],
         Field(validation_alias=AliasChoices("AUTH_MODE", "auth_mode")),
     ] = "disabled"
     auth_jwt_secret: Annotated[
@@ -358,6 +358,28 @@ class Settings(BaseSettings):
         str | None,
         Field(validation_alias=AliasChoices("AUTH_JWT_AUDIENCE", "auth_jwt_audience")),
     ] = None
+    auth_oidc_jwks_url: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("AUTH_OIDC_JWKS_URL", "auth_oidc_jwks_url")),
+    ] = None
+    auth_oidc_issuer: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("AUTH_OIDC_ISSUER", "auth_oidc_issuer")),
+    ] = None
+    auth_oidc_audience: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("AUTH_OIDC_AUDIENCE", "auth_oidc_audience")),
+    ] = None
+    auth_oidc_jwks_cache_seconds: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=86400,
+            validation_alias=AliasChoices(
+                "AUTH_OIDC_JWKS_CACHE_SECONDS", "auth_oidc_jwks_cache_seconds"
+            ),
+        ),
+    ] = 300
     auth_jwt_leeway_seconds: Annotated[
         int,
         Field(
@@ -408,6 +430,11 @@ class Settings(BaseSettings):
     @field_validator("auth_jwt_issuer", "auth_jwt_audience", mode="before")
     @classmethod
     def normalize_auth_jwt_string(cls, value: object) -> object:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
+    @field_validator("auth_oidc_jwks_url", "auth_oidc_issuer", "auth_oidc_audience", mode="before")
+    @classmethod
+    def normalize_auth_oidc_string(cls, value: object) -> object:
         return None if value is None or (isinstance(value, str) and not value.strip()) else value
 
     @field_validator("database_url")
@@ -612,6 +639,13 @@ class Settings(BaseSettings):
                 )
             if not self.auth_jwt_issuer or not self.auth_jwt_audience:
                 raise ValueError("AUTH_JWT_ISSUER and AUTH_JWT_AUDIENCE are required for JWT")
+        if self.auth_mode == "oidc":
+            if not self.auth_oidc_jwks_url:
+                raise ValueError("AUTH_OIDC_JWKS_URL is required when OIDC is enabled")
+            if urlsplit(self.auth_oidc_jwks_url).scheme != "https":
+                raise ValueError("AUTH_OIDC_JWKS_URL must use https")
+            if not self.auth_oidc_issuer or not self.auth_oidc_audience:
+                raise ValueError("AUTH_OIDC_ISSUER and AUTH_OIDC_AUDIENCE are required for OIDC")
         if self.app_env != APP_ENV_DEVELOPMENT:
             if not secret or secret == DEFAULT_SECRET_KEY or len(secret) < 32:
                 raise ValueError(
