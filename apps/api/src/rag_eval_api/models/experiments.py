@@ -253,6 +253,7 @@ class ExperimentRunItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     attempt_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_usage: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    final_judge: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     final_latency_ms: Mapped[int | None] = mapped_column(nullable=True)
     final_trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)

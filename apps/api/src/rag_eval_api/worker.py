@@ -23,6 +23,7 @@ from rag_eval_api.adapters.errors import AdapterError
 from rag_eval_api.candidates.provider import OpenAICompatibleCandidateGenerator
 from rag_eval_api.config import Settings, get_settings
 from rag_eval_api.db import create_engine
+from rag_eval_api.judges.factory import build_judge_provider
 from rag_eval_api.main import configure_logging
 from rag_eval_api.models import AdapterConfig, AdapterKind
 from rag_eval_api.parsers.registry import ParserRegistry
@@ -317,6 +318,16 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
         worker_id=f"experiment-worker-{os.getpid()}",
         lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
         blob_store=cast(BlobStore, blob_store),
+        judge_provider=build_judge_provider(
+            kind=settings.judge_kind,
+            jev_base_url=settings.judge_jev_base_url,
+            jev_api_key=(
+                settings.judge_jev_api_key.get_secret_value()
+                if settings.judge_jev_api_key is not None
+                else None
+            ),
+            confidence_threshold=settings.judge_confidence_threshold,
+        ),
     )
     combined_worker = CombinedWorker(worker, candidate_worker, experiment_worker)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)

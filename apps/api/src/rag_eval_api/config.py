@@ -367,6 +367,34 @@ class Settings(BaseSettings):
         ),
     ] = 30
 
+    judge_kind: Annotated[
+        Literal["noop", "rule-based", "jev"],
+        Field(validation_alias=AliasChoices("JUDGE_KIND", "judge_kind")),
+    ] = "noop"
+    judge_confidence_threshold: Annotated[
+        float,
+        Field(
+            gt=0.0,
+            le=1.0,
+            validation_alias=AliasChoices(
+                "JUDGE_CONFIDENCE_THRESHOLD", "judge_confidence_threshold"
+            ),
+        ),
+    ] = 0.7
+    judge_jev_base_url: Annotated[
+        str | None,
+        Field(validation_alias=AliasChoices("JUDGE_JEV_BASE_URL", "judge_jev_base_url")),
+    ] = None
+    judge_jev_api_key: Annotated[
+        SecretStr | None,
+        Field(validation_alias=AliasChoices("JUDGE_JEV_API_KEY", "judge_jev_api_key")),
+    ] = None
+
+    @field_validator("judge_jev_base_url", mode="before")
+    @classmethod
+    def normalize_judge_jev_base_url(cls, value: object) -> object:
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
     @field_validator("dev_actor_id", mode="before")
     @classmethod
     def normalize_dev_actor_id(cls, value: object) -> object:

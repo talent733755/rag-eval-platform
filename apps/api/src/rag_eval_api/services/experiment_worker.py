@@ -15,6 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rag_eval_api.adapters import Adapter, AdapterRequest
 from rag_eval_api.adapters.errors import AdapterError
+from rag_eval_api.judges.noop import NoopJudge
+from rag_eval_api.judges.protocol import (
+    JudgeProvider,
+    JudgeRequest,
+    JudgeUnavailableError,
+    JudgeVerdict,
+)
 from rag_eval_api.models import (
     AdapterConfig,
     CandidateDatasetItem,
@@ -83,6 +90,7 @@ class ExperimentWorker:
         worker_id: str,
         lease_ttl: timedelta = timedelta(seconds=60),
         blob_store: BlobStore | None = None,
+        judge_provider: JudgeProvider | None = None,
     ) -> None:
         if not worker_id.strip() or len(worker_id) > 255:
             raise ValueError("worker_id must be 1 to 255 characters")
@@ -93,6 +101,7 @@ class ExperimentWorker:
         self.worker_id = worker_id
         self.lease_ttl = lease_ttl
         self.blob_store = blob_store
+        self.judge_provider = judge_provider or NoopJudge()
         self._shutdown_requested = False
 
     def request_shutdown(self) -> None:
@@ -502,6 +511,9 @@ class ExperimentWorker:
                     item.final_usage = response.usage.model_dump(mode="json")
                     item.final_latency_ms = response.usage.latency_ms
                     item.final_trace_id = persisted_trace_id
+                    item.final_judge = await self._judge_item(
+                        session, claim=claim, answer=response.answer
+                    )
                 for index, attempt in enumerate(attempts):
                     attempt_response = attempt.response
                     attempt_usage = (
@@ -613,6 +625,69 @@ class ExperimentWorker:
                     run.lease_expires_at = now + self.lease_ttl
                     run.heartbeat_at = now
         return status
+
+    async def _judge_item(
+        self, session: AsyncSession, *, claim: _Claim, answer: str
+    ) -> dict[str, object] | None:
+        """Run the configured judge for one successful item; never blocks the item.
+
+        A noop judge or a judging failure leaves `final_judge` NULL so the metric is
+        reported missing rather than fabricated. The judge is never golden truth.
+        """
+
+        if self.judge_provider.name == "noop":
+            return None
+        candidate = await session.scalar(
+            select(CandidateDatasetItem).where(
+                CandidateDatasetItem.id == claim.candidate_item_id,
+                CandidateDatasetItem.organization_id == claim.organization_id,
+                CandidateDatasetItem.project_id == claim.project_id,
+            )
+        )
+        reference_answer = candidate.reference_answer if candidate is not None else None
+        try:
+            verdict = await asyncio.to_thread(
+                self.judge_provider.judge,
+                JudgeRequest(
+                    question=claim.question,
+                    answer=answer,
+                    reference_answer=reference_answer,
+                ),
+            )
+        except JudgeUnavailableError:
+            LOGGER.warning(
+                "judge unavailable for run item",
+                extra={
+                    "event": "experiment.judge_unavailable",
+                    "run_id": str(claim.run_id),
+                    "run_item_id": str(claim.run_item_id),
+                    "judge_name": self.judge_provider.name,
+                },
+            )
+            return None
+        except Exception:
+            LOGGER.exception(
+                "judge failed for run item",
+                extra={
+                    "event": "experiment.judge_failed",
+                    "run_id": str(claim.run_id),
+                    "run_item_id": str(claim.run_item_id),
+                    "judge_name": self.judge_provider.name,
+                },
+            )
+            return None
+        return self._verdict_to_payload(verdict)
+
+    @staticmethod
+    def _verdict_to_payload(verdict: JudgeVerdict) -> dict[str, object]:
+        return {
+            "label": verdict.label.value,
+            "confidence": verdict.confidence,
+            "judge_name": verdict.judge_name,
+            "judge_version": verdict.judge_version,
+            "latency_ms": verdict.latency_ms,
+            "needs_review": verdict.needs_review,
+        }
 
     @staticmethod
     def _accumulate_usage(run: ExperimentRun, attempts: list[_AttemptOutcome]) -> None:

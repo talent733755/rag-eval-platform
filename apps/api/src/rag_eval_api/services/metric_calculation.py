@@ -71,6 +71,14 @@ METRIC_SPECS: dict[str, MetricSpec] = {
         "answer_nonempty",
         "ratio",
     ),
+    "answer_correctness": MetricSpec(
+        "answer_correctness",
+        "答案正确率",
+        "generation",
+        "Judge-scored answer correctness against the reference answer.",
+        "judge_correctness",
+        "ratio",
+    ),
     "trace_coverage": MetricSpec(
         "trace_coverage",
         "Trace 覆盖率",
@@ -268,6 +276,18 @@ def _sample_value(
             1.0 if item.final_answer and item.final_answer.strip() else 0.0,
             1.0,
         )
+    if spec.kind == "judge_correctness":
+        judge = item.final_judge
+        if judge is None:
+            return _Value(None, None, None, "judge_not_run")
+        if judge.get("needs_review"):
+            return _Value(None, None, None, "judge_low_confidence")
+        label = judge.get("label")
+        if label == "correct":
+            return _Value(1.0, 1.0, 1.0)
+        if label == "incorrect":
+            return _Value(0.0, 0.0, 1.0)
+        return _Value(None, None, None, "judge_unavailable")
     if spec.kind == "trace_coverage":
         return _Value(
             float(item.final_trace_id is not None), 1.0 if item.final_trace_id else 0.0, 1.0

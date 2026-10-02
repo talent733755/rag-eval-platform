@@ -7,6 +7,7 @@
 - [`metrics-v1.md`](metrics-v1.md)：指标纯函数、缺失语义、版本和结果持久化契约。
 - [`experiment-v1.md`](experiment-v1.md)：实验草稿启动校验和不可变快照边界。
 - [`trace-v1.md`](trace-v1.md)：脱敏 Trace 阶段、Blob 引用、失败分类和查询边界。
+- [`judges-v1.md`](judges-v1.md)：可插拔判定（Judge）契约、置信度回流人工与 `answer_correctness` 指标语义。
 
 Adapter 配置 API 使用项目权限：成员可读，编辑者可改，管理员可删。Python Adapter 的
 `entrypoint_ref` 只能解析部署中已安装且唯一的 `rag_eval_adapter` entry point。连接测试会产生一次
