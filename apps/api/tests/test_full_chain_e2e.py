@@ -423,6 +423,33 @@ async def test_deterministic_full_chain_upload_to_regression_set(
     assert metric_by_key["answer_nonempty_rate"]["value"] == 1
     assert metric_by_key["trace_coverage"]["value"] == 1
 
+    # 7b. Quality gate: deterministic pass/fail over the run's aggregate metrics.
+    passing_gate = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/{experiment_id}/runs/{run_id}/quality-gate",
+        json={"thresholds": [{"metric_key": "success_rate", "min_value": 0.9}]},
+    )
+    assert passing_gate.status_code == 200
+    assert passing_gate.json()["passed"] is True
+    assert passing_gate.json()["incomplete"] is False
+    assert passing_gate.json()["checks"][0]["reason"] == "ok"
+
+    failing_gate = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/{experiment_id}/runs/{run_id}/quality-gate",
+        json={"thresholds": [{"metric_key": "success_rate", "min_value": 1.1}]},
+    )
+    assert failing_gate.status_code == 200
+    assert failing_gate.json()["passed"] is False
+    assert failing_gate.json()["checks"][0]["reason"] == "below_min"
+
+    # A metric that is absent from the run fails by default (never silently passes).
+    missing_gate = await client.post(
+        f"/api/projects/{seed.project_id}/experiments/{experiment_id}/runs/{run_id}/quality-gate",
+        json={"thresholds": [{"metric_key": "answer_correctness", "min_value": 0.9}]},
+    )
+    assert missing_gate.status_code == 200
+    assert missing_gate.json()["passed"] is False
+    assert missing_gate.json()["checks"][0]["reason"] == "metric_missing"
+
     # 8. Trace persisted and sanitized.
     traces = await client.get(f"/api/projects/{seed.project_id}/traces", params={"run_id": run_id})
     assert traces.status_code == 200

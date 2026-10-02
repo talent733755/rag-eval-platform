@@ -1,0 +1,109 @@
+name: "RAG Quality Gate"
+description: >-
+  Block a pull request when a RAG evaluation run regresses below agreed metric
+  floors. This action is a thin, server-authoritative wrapper: it polls the run
+  until it reaches a terminal status, posts the thresholds to the platform's
+  quality-gate endpoint, and fails the job when the verdict is not `passed`.
+  No evaluation logic lives here — thresholds and the verdict are computed
+  server-side so the same gate is reused everywhere.
+author: "rag-eval-platform"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  api-base-url:
+    description: "Base URL of the rag-eval-platform API (e.g. https://eval.example.com)."
+    required: true
+  token:
+    description: "Bearer token with project member access. Pass from a secret."
+    required: true
+  project-id:
+    description: "Project UUID that owns the experiment."
+    required: true
+  experiment-id:
+    description: "Experiment UUID that owns the run."
+    required: true
+  run-id:
+    description: "Run UUID to gate on."
+    required: true
+  thresholds:
+    description: >-
+      JSON array of thresholds, e.g.
+      '[{"metric_key":"success_rate","min_value":0.9}]'.
+    required: true
+  missing-is-pass:
+    description: "Tolerate metrics that were never computed (default: false)."
+    required: false
+    default: "false"
+  poll-timeout-seconds:
+    description: "Maximum time to wait for the run to reach a terminal status."
+    required: false
+    default: "1800"
+  poll-interval-seconds:
+    description: "Interval between run-status polls."
+    required: false
+    default: "10"
+
+outputs:
+  passed:
+    description: "true when the quality gate passed, otherwise false."
+    value: ${{ steps.gate.outputs.passed }}
+  result:
+    description: "Full quality-gate JSON response."
+    value: ${{ steps.gate.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Evaluate quality gate
+      id: gate
+      shell: bash
+      env:
+        RAG_API_BASE_URL: ${{ inputs.api-base-url }}
+        RAG_TOKEN: ${{ inputs.token }}
+        RAG_PROJECT_ID: ${{ inputs.project-id }}
+        RAG_EXPERIMENT_ID: ${{ inputs.experiment-id }}
+        RAG_RUN_ID: ${{ inputs.run-id }}
+        RAG_THRESHOLDS: ${{ inputs.thresholds }}
+        RAG_MISSING_IS_PASS: ${{ inputs.missing-is-pass }}
+        RAG_POLL_TIMEOUT_SECONDS: ${{ inputs.poll-timeout-seconds }}
+        RAG_POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
+      run: |
+        set -euo pipefail
+        base="${RAG_API_BASE_URL%/}"
+        run_url="$base/api/projects/$RAG_PROJECT_ID/experiments/$RAG_EXPERIMENT_ID/runs/$RAG_RUN_ID"
+        gate_url="$run_url/quality-gate"
+
+        deadline=$(( $(date +%s) + RAG_POLL_TIMEOUT_SECONDS ))
+        status=""
+        while :; do
+          status=$(curl -fsS -H "Authorization: Bearer $RAG_TOKEN" "$run_url" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+          case "$status" in
+            succeeded|failed) break ;;
+          esac
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::error::run $RAG_RUN_ID did not finish within ${RAG_POLL_TIMEOUT_SECONDS}s (status=$status)"
+            exit 1
+          fi
+          echo "run status=$status; waiting ${RAG_POLL_INTERVAL_SECONDS}s…"
+          sleep "$RAG_POLL_INTERVAL_SECONDS"
+        done
+
+        body=$(python3 -c 'import json,os; print(json.dumps({"thresholds": json.loads(os.environ["RAG_THRESHOLDS"]), "missing_is_pass": os.environ["RAG_MISSING_IS_PASS"].lower() == "true"}))')
+        response=$(curl -fsS -X POST \
+          -H "Authorization: Bearer $RAG_TOKEN" \
+          -H "content-type: application/json" \
+          -d "$body" "$gate_url")
+
+        echo "$response" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(f"  {c[\"metric_key\"]}: {\"PASS\" if c[\"passed\"] else \"FAIL\"} (actual={c[\"actual\"]}, reason={c[\"reason\"]})" for c in d["checks"]))'
+
+        passed=$(echo "$response" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin)["passed"] else "false")')
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        { echo "result<<RAG_GATE_EOF"; echo "$response"; echo "RAG_GATE_EOF"; } >> "$GITHUB_OUTPUT"
+
+        if [ "$passed" != "true" ]; then
+          echo "::error::RAG quality gate failed for run $RAG_RUN_ID"
+          exit 1
+        fi
