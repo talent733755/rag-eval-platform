@@ -19,6 +19,9 @@ from rag_eval_api.candidates.protocol import (
     CandidateGenerationResult,
     CandidateGenerator,
 )
+from rag_eval_api.candidates.quality_gate import run_quality_gate, verdict_to_checks
+from rag_eval_api.judges.noop import NoopJudge
+from rag_eval_api.judges.protocol import JudgeProvider
 from rag_eval_api.models import (
     CandidateDataset,
     CandidateDatasetItem,
@@ -95,6 +98,7 @@ class CandidateWorker:
         lease_ttl: timedelta = timedelta(seconds=60),
         batch_size: int = 1,
         heartbeat_interval: timedelta | None = None,
+        judge_provider: JudgeProvider | None = None,
     ) -> None:
         if not worker_id.strip() or len(worker_id) > 255:
             raise ValueError("worker_id must be 1 to 255 characters")
@@ -107,6 +111,7 @@ class CandidateWorker:
             raise ValueError("heartbeat_interval must be positive and less than lease_ttl")
         self.session_factory = session_factory
         self.generator = generator
+        self.judge_provider = judge_provider if judge_provider is not None else NoopJudge()
         self.worker_id = worker_id
         self.lease_ttl = lease_ttl
         self.batch_size = batch_size
@@ -437,6 +442,11 @@ class CandidateWorker:
                             job.status = IngestionJobStatus.failed
                         else:
                             for draft in result.items:
+                                gate = run_quality_gate(self.judge_provider, draft)
+                                automatic_checks: dict[str, object] = {
+                                    **draft.automatic_checks,
+                                    "quality_gate": verdict_to_checks(gate),
+                                }
                                 item = CandidateDatasetItem(
                                     organization_id=claim.organization_id,
                                     project_id=claim.project_id,
@@ -448,7 +458,7 @@ class CandidateWorker:
                                     question_type=draft.question_type,
                                     reference_answer=draft.reference_answer,
                                     confidence=draft.confidence,
-                                    automatic_checks=draft.automatic_checks,
+                                    automatic_checks=automatic_checks,
                                     review_status=CandidateReviewStatus.pending,
                                     provenance=draft.provenance,
                                 )

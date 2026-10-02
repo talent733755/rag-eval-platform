@@ -45,6 +45,15 @@ input, enforces a timeout, and is deterministic (probability-based, not sampled)
 Jev's fast decision-model profile makes it suitable for CI regression gating where
 LLM-as-judge cost and latency are prohibitive.
 
+## Candidate quality gate
+
+During candidate generation the configured judge also pre-screens each draft for
+*consistency* between the reference answer and the source evidence. The verdict is
+folded into the item's `automatic_checks.quality_gate` and surfaced in the review
+queue. The gate is advisory: a confident *inconsistency* or a low-confidence verdict
+flags the item for a human (`needs_human_review: true`) rather than auto-rejecting it.
+With the default `noop` judge nothing is screened and no review signal is emitted.
+
 ## Configuration
 
 * `JUDGE_KIND` — `noop` (default) | `rule-based` | `jev`.

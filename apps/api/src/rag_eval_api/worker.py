@@ -265,6 +265,16 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
         heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
         orphan_blob_grace_period=timedelta(seconds=settings.orphan_blob_grace_seconds),
     )
+    judge_provider = build_judge_provider(
+        kind=settings.judge_kind,
+        jev_base_url=settings.judge_jev_base_url,
+        jev_api_key=(
+            settings.judge_jev_api_key.get_secret_value()
+            if settings.judge_jev_api_key is not None
+            else None
+        ),
+        confidence_threshold=settings.judge_confidence_threshold,
+    )
     candidate_worker = None
     if settings.provider_base_url is not None and settings.provider_api_key is not None:
         generator = OpenAICompatibleCandidateGenerator(
@@ -283,6 +293,7 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
             lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
             batch_size=settings.worker_batch_size,
             heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
+            judge_provider=judge_provider,
         )
 
     def build_adapter(config: AdapterConfig) -> Adapter:
@@ -318,16 +329,7 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
         worker_id=f"experiment-worker-{os.getpid()}",
         lease_ttl=timedelta(seconds=settings.worker_lease_ttl_seconds),
         blob_store=cast(BlobStore, blob_store),
-        judge_provider=build_judge_provider(
-            kind=settings.judge_kind,
-            jev_base_url=settings.judge_jev_base_url,
-            jev_api_key=(
-                settings.judge_jev_api_key.get_secret_value()
-                if settings.judge_jev_api_key is not None
-                else None
-            ),
-            confidence_threshold=settings.judge_confidence_threshold,
-        ),
+        judge_provider=judge_provider,
     )
     combined_worker = CombinedWorker(worker, candidate_worker, experiment_worker)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)

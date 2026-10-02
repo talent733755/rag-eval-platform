@@ -22,7 +22,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from pydantic import SecretStr
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from rag_eval_api.adapters.errors import AdapterError
@@ -31,8 +31,16 @@ from rag_eval_api.auth.context import RequestActor, get_current_actor
 from rag_eval_api.candidates.fake import FakeCandidateGenerator
 from rag_eval_api.config import DEFAULT_REDIS_URL, DEFAULT_SECRET_KEY, Settings
 from rag_eval_api.db import get_db_session
+from rag_eval_api.judges.rule_based import RuleBasedJudge
 from rag_eval_api.main import create_app
-from rag_eval_api.models import Base, Membership, MembershipRole, Organization, Project
+from rag_eval_api.models import (
+    Base,
+    CandidateDatasetItem,
+    Membership,
+    MembershipRole,
+    Organization,
+    Project,
+)
 from rag_eval_api.services.candidate_worker import CandidateWorker
 from rag_eval_api.services.experiment_worker import ExperimentWorker
 from rag_eval_api.storage.protocol import StoredBlob
@@ -281,10 +289,24 @@ async def test_deterministic_full_chain_upload_to_regression_set(
         generator=OpenAICompatibleFakeGenerator(),
         worker_id="e2e-candidate-worker",
         lease_ttl=timedelta(seconds=30),
+        judge_provider=RuleBasedJudge(),
     )
     gen_result = await candidate_worker.process_batch(1)
     assert gen_result.processed == 1
     assert gen_result.succeeded == 1
+
+    # 3b. The quality gate screened the generated candidate and persisted the verdict.
+    async with session_factory() as session:
+        screened_item = await session.scalar(
+            select(CandidateDatasetItem).where(
+                CandidateDatasetItem.dataset_version_id == dataset_version_id
+            )
+        )
+        assert screened_item is not None
+        gate = screened_item.automatic_checks["quality_gate"]
+        assert gate["screened"] is True
+        assert gate["judge_label"] == "correct"
+        assert gate["needs_human_review"] is False
 
     # 4. Review (accept) the generated candidate item.
     items_page = await client.get(
