@@ -3,6 +3,7 @@ export type DocumentRow = {
   display_name: string;
   source_type: string;
   latest_version?: {
+    id?: string;
     version_number: number;
     parse_status?: string;
     sha256?: string;

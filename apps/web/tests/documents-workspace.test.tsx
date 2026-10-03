@@ -85,4 +85,60 @@ describe("DocumentsWorkspace", () => {
     await waitFor(() => expect(screen.getByText("任务已完成")).toBeInTheDocument(), { timeout: 3000 });
     expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("/ingestion-jobs/job-1"), expect.anything());
   });
+
+  it("generates a candidate dataset from a parsed document version", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "doc-1",
+                display_name: "产品说明.md",
+                source_type: "markdown",
+                latest_version: { id: "version-1", version_number: 2, parse_status: "succeeded" },
+              },
+            ],
+            next_cursor: null,
+            summary: { total: 1 },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ job_id: "job-1", dataset_id: "ds-1", dataset_version_id: "dsv-1", status: "queued" }),
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    render(<DocumentsWorkspace />);
+    await waitFor(() => expect(screen.getByText("产品说明.md")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "生成候选评测集" }));
+    const dialog = await screen.findByRole("dialog", { name: "生成候选评测集" });
+    fireEvent.change(screen.getByLabelText("评测集名称"), { target: { value: "产品 FAQ 评测集" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
+
+    await waitFor(() =>
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expect.stringContaining(`/api/projects/${projectId}/documents/doc-1/generate-candidates`),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            document_version_id: "version-1",
+            dataset_name: "产品 FAQ 评测集",
+            capability_version: "candidate-generation-v1",
+            prompt_version: "v1",
+            seed: null,
+            randomness: 1,
+          }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByText(/已加入生成队列/)).toBeInTheDocument());
+    expect(dialog).not.toBeInTheDocument();
+  });
 });

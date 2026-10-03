@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 
 import { DataCard } from "@/components/ui/data-card";
 import { DocumentDetailDrawer } from "@/components/documents/document-detail-drawer";
+import { GenerateCandidatesDialog } from "@/components/documents/generate-candidates-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { createApiClient } from "@/lib/api/client";
@@ -28,6 +29,8 @@ export function DocumentsWorkspace() {
   const [query, setQuery] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [generateTarget, setGenerateTarget] = useState<{ documentId: string; versionId: string; name: string } | null>(null);
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const client = useMemo(() => createApiClient(), []);
   const refreshDocuments = useCallback(() => setRefreshNonce((current) => current + 1), []);
@@ -100,6 +103,7 @@ export function DocumentsWorkspace() {
       </div>
 
       {state.uploadMessage && <p className={state.uploadState === "error" || state.uploadState === "partial" ? "text-sm text-danger-foreground" : "text-sm text-success-foreground"} role={state.uploadState === "error" ? "alert" : "status"}>{state.uploadMessage}</p>}
+      {generateMessage && <p className="text-sm text-success-foreground" role="status">{generateMessage}</p>}
 
       <section aria-label="文档统计" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <DataCard label="文档总数" value={state.summary.total ?? rows.length} supportingText="当前项目" />
@@ -123,11 +127,11 @@ export function DocumentsWorkspace() {
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[680px] text-left text-sm">
               <thead className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                <tr><th className="px-3 py-3" scope="col">文档名称</th><th className="px-3 py-3" scope="col">类型</th><th className="px-3 py-3" scope="col">版本</th><th className="px-3 py-3" scope="col">解析状态</th></tr>
+                <tr><th className="px-3 py-3" scope="col">文档名称</th><th className="px-3 py-3" scope="col">类型</th><th className="px-3 py-3" scope="col">版本</th><th className="px-3 py-3" scope="col">解析状态</th><th className="px-3 py-3" scope="col">操作</th></tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((row) => (
-                  <tr key={row.id}><th className="px-3 py-4 font-medium text-text" scope="row"><button type="button" className="text-left hover:text-primary" onClick={() => setSelectedDocumentId(row.id)}>{row.display_name}</button></th><td className="px-3 py-4 text-muted">{row.source_type.toUpperCase()}</td><td className="px-3 py-4 text-muted">v{row.latest_version?.version_number ?? "—"}</td><td className="px-3 py-4"><StatusBadge status={statusFor(row.latest_version?.parse_status)}>{statusLabel(row.latest_version?.parse_status)}</StatusBadge></td></tr>
+                  <tr key={row.id}><th className="px-3 py-4 font-medium text-text" scope="row"><button type="button" className="text-left hover:text-primary" onClick={() => setSelectedDocumentId(row.id)}>{row.display_name}</button></th><td className="px-3 py-4 text-muted">{row.source_type.toUpperCase()}</td><td className="px-3 py-4 text-muted">v{row.latest_version?.version_number ?? "—"}</td><td className="px-3 py-4"><StatusBadge status={statusFor(row.latest_version?.parse_status)}>{statusLabel(row.latest_version?.parse_status)}</StatusBadge></td><td className="px-3 py-4">{row.latest_version?.parse_status === "succeeded" && row.latest_version.id ? <button type="button" className="rounded-md border border-border px-3 py-1.5 text-sm text-text hover:border-primary hover:text-primary" onClick={() => { setGenerateMessage(null); setGenerateTarget({ documentId: row.id, versionId: row.latest_version!.id!, name: row.display_name }); }}>生成候选评测集</button> : <span className="text-xs text-muted">—</span>}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -135,6 +139,7 @@ export function DocumentsWorkspace() {
         )}
       </section>
       {selectedDocumentId && <DocumentDetailDrawer client={client} projectId={projectId} documentId={selectedDocumentId} jobId={state.jobsByDocument[selectedDocumentId]} onClose={() => setSelectedDocumentId(null)} onChanged={refreshDocuments} />}
+      {generateTarget && <GenerateCandidatesDialog client={client} projectId={projectId} documentId={generateTarget.documentId} documentVersionId={generateTarget.versionId} documentName={generateTarget.name} onClose={() => setGenerateTarget(null)} onGenerated={setGenerateMessage} />}
     </div>
   );
 }
