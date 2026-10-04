@@ -327,6 +327,16 @@ class Settings(BaseSettings):
             validation_alias=AliasChoices("PROVIDER_TIMEOUT_SECONDS", "provider_timeout_seconds"),
         ),
     ] = 30
+    generation_chunk_batch_size: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=200,
+            validation_alias=AliasChoices(
+                "GENERATION_CHUNK_BATCH_SIZE", "generation_chunk_batch_size"
+            ),
+        ),
+    ] = 30
     provider_allowed_hosts: Annotated[
         list[str],
         NoDecode,

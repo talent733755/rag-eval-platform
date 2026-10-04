@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -28,6 +27,8 @@ from rag_eval_api.db import (
     get_db_session,
     get_redis_client,
 )
+from rag_eval_api.log_sanitize import redact_text as _redact_text_impl
+from rag_eval_api.log_sanitize import sanitize_exception
 from rag_eval_api.middleware import RequestBodyLimitMiddleware
 from rag_eval_api.routes.adapters import router as adapters_router
 from rag_eval_api.routes.candidate_datasets import router as candidate_datasets_router
@@ -105,24 +106,7 @@ class JsonLogFormatter(logging.Formatter):
 
 
 def _redact_text(text: str) -> str:
-    redacted = re.sub(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s]+", "[redacted-url]", text)
-    return re.sub(
-        r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*=\s*[^\s]+",
-        r"\1=[redacted]",
-        redacted,
-    )[:200]
-
-
-def sanitize_exception(exc: Exception) -> str:
-    """Keep exception context useful while removing URLs and common credentials."""
-
-    message = re.sub(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s]+", "[redacted-url]", str(exc))
-    message = re.sub(
-        r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*=\s*[^\s]+",
-        r"\1=[redacted]",
-        message,
-    )
-    return message[:200]
+    return _redact_text_impl(text)
 
 
 def configure_logging(settings: Settings) -> None:

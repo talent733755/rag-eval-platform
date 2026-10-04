@@ -22,6 +22,7 @@ from rag_eval_api.candidates.protocol import (
 from rag_eval_api.candidates.quality_gate import run_quality_gate, verdict_to_checks
 from rag_eval_api.judges.noop import NoopJudge
 from rag_eval_api.judges.protocol import JudgeProvider
+from rag_eval_api.log_sanitize import sanitize_exception
 from rag_eval_api.models import (
     CandidateDataset,
     CandidateDatasetItem,
@@ -100,6 +101,7 @@ class CandidateWorker:
         batch_size: int = 1,
         heartbeat_interval: timedelta | None = None,
         judge_provider: JudgeProvider | None = None,
+        chunk_batch_size: int = 30,
     ) -> None:
         if not worker_id.strip() or len(worker_id) > 255:
             raise ValueError("worker_id must be 1 to 255 characters")
@@ -107,6 +109,8 @@ class CandidateWorker:
             raise ValueError("lease_ttl must be positive")
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
+        if chunk_batch_size < 1:
+            raise ValueError("chunk_batch_size must be positive")
         interval = heartbeat_interval or lease_ttl / 3
         if interval <= timedelta(0) or interval >= lease_ttl:
             raise ValueError("heartbeat_interval must be positive and less than lease_ttl")
@@ -116,6 +120,7 @@ class CandidateWorker:
         self.worker_id = worker_id
         self.lease_ttl = lease_ttl
         self.batch_size = batch_size
+        self.chunk_batch_size = chunk_batch_size
         self.heartbeat_interval = interval
         self._shutdown_requested = False
         self._active_task: asyncio.Task[Any] | None = None
@@ -335,22 +340,9 @@ class CandidateWorker:
             return None
         failure: _Failure | None = None
         result: CandidateGenerationResult | None = None
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(claim))
         try:
-            request = CandidateGenerationRequest(
-                document_version_id=claim.source_version_id,
-                dataset_name=claim.dataset_name,
-                capability_version=claim.capability_version,
-                prompt_version=claim.prompt_version,
-                parser_version=claim.parser_version,
-                seed=claim.seed,
-                randomness=claim.randomness,
-                chunks=claim.chunks,
-                request_id=claim.request_id,
-            )
-            generation_task = asyncio.create_task(
-                asyncio.to_thread(self.generator.generate, request)
-            )
-            heartbeat_task = asyncio.create_task(self._heartbeat_loop(claim))
+            generation_task = asyncio.create_task(self._generate_all_batches(claim))
             self._active_task = generation_task
             try:
                 done, _ = await asyncio.wait(
@@ -374,6 +366,76 @@ class CandidateWorker:
         if final is None:
             return "lease_lost"
         return final.value
+
+    async def _generate_all_batches(self, claim: _Claim) -> CandidateGenerationResult:
+        """Split the chunk snapshot into bounded provider calls and merge candidates.
+
+        Large multi-document snapshots can exceed a provider's context window, so we
+        fan out one call per ``chunk_batch_size`` chunks. A failed batch is skipped
+        (partial success) as long as at least one batch yields candidates.
+        """
+
+        chunks = claim.chunks
+        batches = [
+            chunks[index : index + self.chunk_batch_size]
+            for index in range(0, len(chunks), self.chunk_batch_size)
+        ]
+        merged_items: list[Any] = []
+        provider_name = claim.provider_name
+        last_error: Exception | None = None
+        succeeded_batches = 0
+        for batch_index, batch in enumerate(batches):
+            request = CandidateGenerationRequest(
+                document_version_id=claim.source_version_id,
+                dataset_name=claim.dataset_name,
+                capability_version=claim.capability_version,
+                prompt_version=claim.prompt_version,
+                parser_version=claim.parser_version,
+                seed=claim.seed,
+                randomness=claim.randomness,
+                chunks=batch,
+                request_id=f"{claim.request_id}#{batch_index}",
+            )
+            try:
+                batch_result = await asyncio.to_thread(self.generator.generate, request)
+            except Exception as exc:  # noqa: BLE001 - partial success across batches
+                last_error = exc
+                LOGGER.warning(
+                    "candidate.batch_failed",
+                    extra={
+                        "event": "candidate.batch_failed",
+                        "job_id": str(claim.job_id),
+                        "attempt_number": claim.attempt_number,
+                        "error_message": sanitize_exception(exc),
+                    },
+                )
+                continue
+            succeeded_batches += 1
+            provider_name = batch_result.provider_name
+            merged_items.extend(batch_result.items)
+        if not merged_items:
+            raise last_error if last_error is not None else RuntimeError("empty_generation_result")
+        LOGGER.info(
+            "candidate.batches_completed",
+            extra={
+                "event": "candidate.batches_completed",
+                "job_id": str(claim.job_id),
+                "attempt_number": claim.attempt_number,
+                "orphan_blobs_scanned": len(batches),
+                "failed_count": len(batches) - succeeded_batches,
+            },
+        )
+        return CandidateGenerationResult(
+            capability_version=claim.capability_version,
+            provider_name=provider_name,
+            items=tuple(merged_items),
+            provenance={
+                "batching": True,
+                "batch_count": len(batches),
+                "succeeded_batches": succeeded_batches,
+                "chunk_batch_size": self.chunk_batch_size,
+            },
+        )
 
     async def _heartbeat_loop(self, claim: _Claim) -> None:
         while True:

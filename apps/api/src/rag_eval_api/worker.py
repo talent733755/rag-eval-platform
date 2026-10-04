@@ -294,6 +294,7 @@ async def _build_runtime(settings: Settings) -> tuple[WorkerRuntime, AsyncEngine
             batch_size=settings.worker_batch_size,
             heartbeat_interval=timedelta(seconds=settings.worker_heartbeat_interval_seconds),
             judge_provider=judge_provider,
+            chunk_batch_size=settings.generation_chunk_batch_size,
         )
 
     def build_adapter(config: AdapterConfig) -> Adapter:
