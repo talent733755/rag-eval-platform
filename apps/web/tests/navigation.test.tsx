@@ -32,24 +32,24 @@ describe("permission-aware navigation", () => {
 
     const navigation = screen.getByRole("navigation", { name: "主导航" });
     expect(navigation.textContent).toContain("工作台");
-    expect(navigation.textContent).toContain("数据资产");
-    expect(navigation.textContent).toContain("评测实验");
-    expect(navigation.textContent).toContain("分析诊断");
-    expect(navigation.textContent).toContain("系统管理");
+    expect(navigation.textContent).toContain("准备数据");
+    expect(navigation.textContent).toContain("运行评测");
+    expect(navigation.textContent).toContain("分析");
+    expect(navigation.textContent).toContain("配置");
 
     expect([...navigation.querySelectorAll("a")].map((link) => link.textContent)).toEqual([
       "工作台",
       "文档库",
       "评测集",
       "审核队列",
-      "Pipeline 接入",
       "实验任务",
       "运行记录",
       "指标看板",
-      "Trace 分析",
       "失败案例",
+      "Pipeline 接入",
       "模型与服务",
       "项目与成员",
+      "Trace 分析",
     ]);
   });
 
@@ -63,7 +63,7 @@ describe("permission-aware navigation", () => {
     expect(screen.queryByRole("link", { name: "Pipeline 接入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "实验任务" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "项目与成员" })).not.toBeInTheDocument();
-    expect(screen.queryByText("系统管理")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "模型与服务" })).not.toBeInTheDocument();
   });
 
   it("keeps service administration exclusive to administrators", () => {

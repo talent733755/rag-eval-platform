@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 
 import { EmptyState } from "@/components/ui/empty-state";
+import { ProjectLink } from "@/components/ui/project-link";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { createApiClient } from "@/lib/api/client";
 import { getProjectIdFromSearch, useProjectSearch } from "@/lib/project-context";
@@ -174,7 +175,29 @@ export function CandidateReviewWorkspace() {
         <label className="flex flex-1 flex-col gap-1 text-sm text-muted">版本<select className="rounded-md border border-border bg-canvas px-3 py-2 text-text" value={versionId} onChange={(event) => setVersionId(event.target.value)}><option value="">请选择版本</option>{versions.map((version) => <option key={version.id} value={version.id}>v{version.version_number} · {version.status}</option>)}</select></label>
       </section>
       {loading && <p className="text-sm text-muted" role="status">正在加载候选…</p>}
-      {!loading && versionId && state.items.length === 0 && <p className="text-sm text-muted">当前版本没有候选，或候选任务尚未完成。</p>}
+      {!loading && versionId && state.items.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-canvas px-6 py-10 text-center">
+          <p className="text-sm font-medium text-text">当前版本还没有候选</p>
+          <p className="mt-2 text-sm text-muted">
+            候选由文档自动生成。请先到文档库选择已解析的文档，生成候选评测集，完成后回到这里审核。
+          </p>
+          <ProjectLink href="/documents" className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">
+            去文档库生成
+          </ProjectLink>
+        </div>
+      )}
+      {!loading && !versionId && datasetId && (
+        <p className="text-sm text-muted">请选择一个版本查看候选。</p>
+      )}
+      {!loading && !datasetId && (
+        <div className="rounded-lg border border-dashed border-border bg-canvas px-6 py-10 text-center">
+          <p className="text-sm font-medium text-text">还没有可审核的评测集</p>
+          <p className="mt-2 text-sm text-muted">先从文档生成一个评测集，它会自动出现在这里供你审核。</p>
+          <ProjectLink href="/documents" className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">
+            去生成评测集
+          </ProjectLink>
+        </div>
+      )}
       <div className="grid gap-4 xl:grid-cols-2">
         {state.items.map((rawItem) => {
           const item = rawItem as unknown as Item;

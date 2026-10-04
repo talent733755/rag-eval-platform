@@ -102,17 +102,21 @@ async def _version(
 
 @router.get("/candidate-datasets", response_model=list[CandidateDatasetResponse])
 async def list_candidate_datasets(
+    include_archived: bool = Query(default=False),
     access: ProjectAccess = Depends(require_project_member),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> list[CandidateDataset]:
+    filters = [
+        CandidateDataset.organization_id == access.actor.organization_id,
+        CandidateDataset.project_id == access.project.id,
+    ]
+    if not include_archived:
+        filters.append(CandidateDataset.status != CandidateDatasetStatus.archived)
     return list(
         (
             await db_session.scalars(
                 select(CandidateDataset)
-                .where(
-                    CandidateDataset.organization_id == access.actor.organization_id,
-                    CandidateDataset.project_id == access.project.id,
-                )
+                .where(*filters)
                 .order_by(CandidateDataset.updated_at.desc())
             )
         ).all()
@@ -299,6 +303,39 @@ async def publish_candidate_dataset_version(
     )
     await db_session.commit()
     return version
+
+
+@router.post(
+    "/candidate-datasets/{dataset_id}/archive",
+    response_model=CandidateDatasetResponse,
+)
+async def archive_candidate_dataset(
+    dataset_id: UUID,
+    access: ProjectAccess = Depends(require_project_editor),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> CandidateDataset:
+    """Soft-delete (archive) a dataset so it no longer appears in the active list.
+
+    Archiving is reversible and audit-logged; published/archived datasets stay
+    immutable and their versions are untouched.
+    """
+
+    dataset = await _dataset(db_session, access, dataset_id)
+    if dataset.status is CandidateDatasetStatus.archived:
+        return dataset
+    dataset.status = CandidateDatasetStatus.archived
+    record_audit_event(
+        db_session,
+        organization_id=access.actor.organization_id,
+        project_id=access.project.id,
+        actor_id=access.actor.user_id,
+        action="candidate_dataset.archived",
+        resource_type="candidate_dataset",
+        resource_id=str(dataset.id),
+        metadata={"name": dataset.name},
+    )
+    await db_session.commit()
+    return dataset
 
 
 @router.post(

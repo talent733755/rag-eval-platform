@@ -56,7 +56,7 @@ describe("DocumentsWorkspace", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     render(<DocumentsWorkspace />);
-    await waitFor(() => expect(screen.getByText("还没有文档。上传一份 PDF、Word、Markdown 或 TXT 后即可开始解析。")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("还没有文档")).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText("上传文档"), {
       target: { files: [new File(["内容"], "说明.md", { type: "text/markdown" })] },
@@ -77,7 +77,7 @@ describe("DocumentsWorkspace", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     render(<DocumentsWorkspace />);
-    await waitFor(() => expect(screen.getByText("还没有文档。上传一份 PDF、Word、Markdown 或 TXT 后即可开始解析。")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("还没有文档")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("上传文档"), { target: { files: [new File(["内容"], "说明.md", { type: "text/markdown" })] } });
     await waitFor(() => expect(screen.getByText("说明.md")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "说明.md" }));

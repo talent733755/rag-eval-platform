@@ -80,6 +80,7 @@ export type ApiClient = {
   reviewCandidateItem(projectId: string, datasetId: string, versionId: string, payload: CandidateReviewRequest, options?: { signal?: AbortSignal }): Promise<CandidateItemResponse>;
   publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
+  archiveCandidateDataset(projectId: string, datasetId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetResponse>;
   generateCandidates(projectId: string, documentId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
   generateCandidateDataset(projectId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
   listAdapters(projectId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig[]>;
@@ -222,6 +223,12 @@ export function createApiClient({
     async archiveCandidateDatasetVersion(projectId, datasetId, versionId, options) {
       return requestJson<CandidateDatasetVersionResponse>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/versions/${encodeURIComponent(versionId)}/archive`,
+        { method: "POST", signal: options?.signal }, fetchImpl,
+      );
+    },
+    async archiveCandidateDataset(projectId, datasetId, options) {
+      return requestJson<CandidateDatasetResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/${encodeURIComponent(datasetId)}/archive`,
         { method: "POST", signal: options?.signal }, fetchImpl,
       );
     },

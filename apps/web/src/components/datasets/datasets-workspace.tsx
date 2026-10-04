@@ -24,6 +24,21 @@ export function DatasetsWorkspace() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+
+  async function archive(dataset: Dataset) {
+    if (!projectId || archivingId) return;
+    setArchivingId(dataset.id);
+    setError(null);
+    try {
+      await client.archiveCandidateDataset(projectId, dataset.id);
+      setDatasets((current) => current.filter((item) => item.id !== dataset.id));
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "归档失败");
+    } finally {
+      setArchivingId(null);
+    }
+  }
 
   useEffect(() => {
     if (!projectId) return;
@@ -53,13 +68,19 @@ export function DatasetsWorkspace() {
       <div>
         <p className="text-sm font-medium text-primary">质量资产</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-text sm:text-3xl">评测集</h1>
-        <p className="mt-2 text-sm text-muted">候选样例必须经过逐条审核，发布后的版本不可原地修改。</p>
+        <p className="mt-2 text-sm text-muted">评测集是自动生成的候选样例，需逐条审核后发布，才能用于实验。</p>
       </div>
       <section className="rounded-lg border border-border bg-surface p-4 shadow-sm shadow-slate-900/5" aria-labelledby="datasets-heading">
-        <h2 id="datasets-heading" className="text-base font-semibold text-text">候选评测集</h2>
+        <h2 id="datasets-heading" className="text-base font-semibold text-text">评测集列表</h2>
         {state === "loading" && <p className="mt-6 text-sm text-muted" role="status">正在加载评测集…</p>}
         {state === "error" && <p className="mt-6 text-sm text-danger-foreground" role="alert">{error}</p>}
-        {state === "success" && datasets.length === 0 && <p className="mt-6 text-sm text-muted">当前项目还没有候选评测集。</p>}
+        {state === "success" && datasets.length === 0 && (
+          <div className="mt-6 rounded-lg border border-dashed border-border bg-canvas px-6 py-10 text-center">
+            <p className="text-sm font-medium text-text">还没有评测集</p>
+            <p className="mt-2 text-sm text-muted">评测集由文档自动生成。请先到文档库上传文档并生成候选评测集。</p>
+            <ProjectLink href="/documents" className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">去上传文档</ProjectLink>
+          </div>
+        )}
         {datasets.length > 0 && (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
@@ -69,7 +90,7 @@ export function DatasetsWorkspace() {
               <tbody className="divide-y divide-border">
                 {datasets.map((dataset) => {
                   const status = statusMap[dataset.status] ?? { label: "未知", status: "neutral" as const };
-                  return <tr key={dataset.id}><th scope="row" className="px-3 py-4 font-medium text-text">{dataset.name}</th><td className="px-3 py-4"><StatusBadge status={status.status}>{status.label}</StatusBadge></td><td className="px-3 py-4 text-muted">{new Date(dataset.updated_at).toLocaleString("zh-CN")}</td><td className="px-3 py-4"><ProjectLink href={`/review?dataset=${dataset.id}`} className="rounded-md border border-border px-3 py-1.5 text-sm text-text hover:border-primary hover:text-primary">去审核</ProjectLink></td></tr>;
+                  return <tr key={dataset.id}><th scope="row" className="px-3 py-4 font-medium text-text">{dataset.name}</th><td className="px-3 py-4"><StatusBadge status={status.status}>{status.label}</StatusBadge></td><td className="px-3 py-4 text-muted">{new Date(dataset.updated_at).toLocaleString("zh-CN")}</td><td className="px-3 py-4"><div className="flex items-center gap-2"><ProjectLink href={`/review?dataset=${dataset.id}`} className="rounded-md border border-border px-3 py-1.5 text-sm text-text hover:border-primary hover:text-primary">去审核</ProjectLink><button type="button" disabled={archivingId === dataset.id} onClick={() => void archive(dataset)} className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:border-danger hover:text-danger-foreground disabled:opacity-50">{archivingId === dataset.id ? "归档中…" : "归档"}</button></div></td></tr>;
                 })}
               </tbody>
             </table>

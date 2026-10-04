@@ -16,7 +16,7 @@ export type NavigationEntry = NavigationItem | NavigationGroup;
 export const navigation = [
   { label: "工作台", href: "/", permission: "project.read" },
   {
-    label: "数据资产",
+    label: "准备数据",
     children: [
       { label: "文档库", href: "/documents", permission: "asset.read" },
       { label: "评测集", href: "/datasets", permission: "asset.read" },
@@ -24,26 +24,26 @@ export const navigation = [
     ],
   },
   {
-    label: "评测实验",
+    label: "运行评测",
     children: [
-      { label: "Pipeline 接入", href: "/adapters", permission: "adapter.edit" },
       { label: "实验任务", href: "/experiments", permission: "experiment.edit" },
       { label: "运行记录", href: "/runs", permission: "experiment.read" },
     ],
   },
   {
-    label: "分析诊断",
+    label: "分析",
     children: [
       { label: "指标看板", href: "/metrics", permission: "diagnostics.read" },
-      { label: "Trace 分析", href: "/traces", permission: "diagnostics.read" },
       { label: "失败案例", href: "/failures", permission: "diagnostics.read" },
     ],
   },
   {
-    label: "系统管理",
+    label: "配置",
     children: [
+      { label: "Pipeline 接入", href: "/adapters", permission: "adapter.edit" },
       { label: "模型与服务", href: "/settings/services", permission: "service.admin" },
       { label: "项目与成员", href: "/settings/members", permission: "member.admin" },
+      { label: "Trace 分析", href: "/traces", permission: "diagnostics.read" },
     ],
   },
 ] as const satisfies readonly NavigationEntry[];

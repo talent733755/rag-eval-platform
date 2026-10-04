@@ -204,7 +204,14 @@ export function DocumentsWorkspace() {
         </div>
         {state.listState === "loading" && <p className="mt-6 text-sm text-muted" role="status">正在加载文档…</p>}
         {state.listState === "error" && <p className="mt-6 text-sm text-danger-foreground" role="alert">{state.error}</p>}
-        {state.listState === "success" && rows.length === 0 && <p className="mt-6 text-sm text-muted">还没有文档。上传一份 PDF、Word、Markdown 或 TXT 后即可开始解析。</p>}
+        {state.listState === "success" && rows.length === 0 && (
+          <div className="mt-6 rounded-lg border border-dashed border-border bg-canvas px-6 py-10 text-center">
+            <p className="text-sm font-medium text-text">还没有文档</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted">
+              这是第一步。上传你的知识库文档（PDF、Word、Markdown 或 TXT），系统会自动解析，之后就能生成评测集了。
+            </p>
+          </div>
+        )}
         {rows.length > 0 && (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[680px] text-left text-sm">

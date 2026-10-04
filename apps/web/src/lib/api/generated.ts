@@ -394,6 +394,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/candidate-datasets/{dataset_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Candidate Dataset
+         * @description Soft-delete (archive) a dataset so it no longer appears in the active list.
+         *
+         *     Archiving is reversible and audit-logged; published/archived datasets stay
+         *     immutable and their versions are untouched.
+         */
+        post: operations["archive_candidate_dataset_api_projects__project_id__candidate_datasets__dataset_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/candidate-datasets/{dataset_id}/versions/{version_id}/archive": {
         parameters: {
             query?: never;
@@ -2912,7 +2935,9 @@ export interface operations {
     };
     list_candidate_datasets_api_projects__project_id__candidate_datasets_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_archived?: boolean;
+            };
             header?: never;
             path: {
                 project_id: string;
@@ -3098,6 +3123,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidateDatasetVersionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_candidate_dataset_api_projects__project_id__candidate_datasets__dataset_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateDatasetResponse"];
                 };
             };
             /** @description Validation Error */
