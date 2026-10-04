@@ -26,6 +26,16 @@ from rag_eval_api.models import (
 from rag_eval_api.schemas.candidates import CandidateGenerationRequest
 
 
+def resolve_version_ids(payload: CandidateGenerationRequest) -> list[UUID]:
+    """Primary ``document_version_id`` first, then any extra versions (deduped, stable order)."""
+
+    ids = [payload.document_version_id]
+    for extra in payload.document_version_ids or []:
+        if extra not in ids:
+            ids.append(extra)
+    return ids
+
+
 class CandidateGenerationError(ValueError):
     """A safe, stable candidate generation request error."""
 
@@ -50,14 +60,19 @@ async def create_generation_job(
 ) -> tuple[IngestionJob, CandidateDatasetVersion]:
     """Create one immutable generation snapshot and its durable job."""
 
-    version = await db_session.scalar(
-        select(DocumentVersion).where(
-            DocumentVersion.id == payload.document_version_id,
-            DocumentVersion.document_id == document_id,
-            DocumentVersion.organization_id == organization_id,
-            DocumentVersion.project_id == project_id,
-        )
+    version_ids = resolve_version_ids(payload)
+    versions = list(
+        (
+            await db_session.scalars(
+                select(DocumentVersion).where(
+                    DocumentVersion.id.in_(version_ids),
+                    DocumentVersion.organization_id == organization_id,
+                    DocumentVersion.project_id == project_id,
+                )
+            )
+        ).all()
     )
+    version_by_id = {item.id: item for item in versions}
     document = await db_session.scalar(
         select(Document).where(
             Document.id == document_id,
@@ -65,30 +80,39 @@ async def create_generation_job(
             Document.project_id == project_id,
         )
     )
-    if version is None or document is None:
+    if document is None or any(vid not in version_by_id for vid in version_ids):
+        raise CandidateGenerationError("not_found", "Resource not found.", status_code=404)
+    primary = version_by_id[payload.document_version_id]
+    if primary.document_id != document_id:
         raise CandidateGenerationError("not_found", "Resource not found.", status_code=404)
     if document.archived_at is not None or document.deleted_at is not None:
         raise CandidateGenerationError(
             "document_archived", "Archived documents cannot generate candidates."
         )
-    if version.parse_status is not DocumentParseStatus.succeeded:
-        raise CandidateGenerationError(
-            "document_version_not_parsed", "Document version has not parsed successfully."
-        )
+    for item in versions:
+        if item.parse_status is not DocumentParseStatus.succeeded:
+            raise CandidateGenerationError(
+                "document_version_not_parsed", "Document version has not parsed successfully."
+            )
 
     chunks = list(
         (
             await db_session.scalars(
                 select(DocumentChunk)
                 .where(
-                    DocumentChunk.document_version_id == version.id,
+                    DocumentChunk.document_version_id.in_(version_ids),
                     DocumentChunk.organization_id == organization_id,
                     DocumentChunk.project_id == project_id,
                 )
-                .order_by(DocumentChunk.ordinal, DocumentChunk.id)
+                .order_by(
+                    DocumentChunk.document_version_id, DocumentChunk.ordinal, DocumentChunk.id
+                )
             )
         ).all()
     )
+    # Order chunks by requested version order, then ordinal within each version.
+    version_order = {vid: index for index, vid in enumerate(version_ids)}
+    chunks.sort(key=lambda chunk: (version_order[chunk.document_version_id], chunk.ordinal, chunk.id))
     if not chunks:
         raise CandidateGenerationError(
             "document_has_no_chunks", "Document version has no parsed chunks."
@@ -96,7 +120,8 @@ async def create_generation_job(
 
     chunk_hashes = [chunk.content_hash for chunk in chunks]
     fingerprint_payload = {
-        "document_version_id": str(version.id),
+        "document_version_id": str(primary.id),
+        "document_version_ids": [str(vid) for vid in version_ids],
         "dataset_name": payload.dataset_name,
         "capability_version": payload.capability_version,
         "prompt_version": payload.prompt_version,
@@ -189,10 +214,10 @@ async def create_generation_job(
         provider_name=provider_name,
         model_name=model_name,
         prompt_version=payload.prompt_version,
-        parser_version=version.parser_version,
+        parser_version=primary.parser_version,
         seed=payload.seed,
         randomness=payload.randomness,
-        requested_version_ids=[str(version.id)],
+        requested_version_ids=[str(vid) for vid in version_ids],
         chunk_content_hashes=chunk_hashes,
         environment={"app_env": "server", "source": "candidate-generation-v1"},
         request_id=idempotency_key,
@@ -206,7 +231,7 @@ async def create_generation_job(
         job_kind=IngestionJobKind.generate_candidates,
         status=IngestionJobStatus.queued,
         candidate_dataset_id=dataset.id,
-        source_version_id=version.id,
+        source_version_id=primary.id,
         generation_config_id=config.id,
         candidate_dataset_version_id=dataset_version.id,
         idempotency_key=idempotency_key,

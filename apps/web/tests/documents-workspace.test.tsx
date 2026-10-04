@@ -141,4 +141,67 @@ describe("DocumentsWorkspace", () => {
     await waitFor(() => expect(screen.getByText(/已加入生成队列/)).toBeInTheDocument());
     expect(dialog).not.toBeInTheDocument();
   });
+
+  it("batch-generates one dataset from multiple parsed documents", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "doc-1",
+                display_name: "第一篇.md",
+                source_type: "markdown",
+                latest_version: { id: "version-1", version_number: 1, parse_status: "succeeded" },
+              },
+              {
+                id: "doc-2",
+                display_name: "第二篇.md",
+                source_type: "markdown",
+                latest_version: { id: "version-2", version_number: 1, parse_status: "succeeded" },
+              },
+            ],
+            next_cursor: null,
+            summary: { total: 2 },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ job_id: "job-9", dataset_id: "ds-9", dataset_version_id: "dsv-9", status: "queued" }),
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    render(<DocumentsWorkspace />);
+    await waitFor(() => expect(screen.getByText("第一篇.md")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 第一篇.md" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 第二篇.md" }));
+    fireEvent.click(screen.getByRole("button", { name: /批量生成评测集/ }));
+    fireEvent.change(screen.getByLabelText("评测集名称"), { target: { value: "合并评测集" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始生成" }));
+
+    await waitFor(() =>
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expect.stringContaining(`/api/projects/${projectId}/candidate-datasets/generate`),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            document_version_id: "version-1",
+            document_version_ids: ["version-1", "version-2"],
+            dataset_name: "合并评测集",
+            capability_version: "candidate-generation-v1",
+            prompt_version: "v1",
+            seed: null,
+            randomness: 1,
+          }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole("link", { name: "去审核" })).toBeInTheDocument());
+  });
 });

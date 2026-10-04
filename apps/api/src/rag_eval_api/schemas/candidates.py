@@ -4,16 +4,27 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CandidateGenerationRequest(BaseModel):
     document_version_id: UUID
+    # Optional multi-document form. When set, it must include ``document_version_id``
+    # (treated as the primary version); generation aggregates chunks across all of
+    # them into one dataset version. Backwards compatible: omitted means single-doc.
+    document_version_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=50)
     dataset_name: str = Field(min_length=1, max_length=255)
     capability_version: str = Field(pattern=r"^candidate-generation-v1$")
     prompt_version: str = Field(min_length=1, max_length=100)
     seed: int | None = None
     randomness: float = Field(ge=0, le=2)
+
+    @field_validator("document_version_ids")
+    @classmethod
+    def _dedupe_version_ids(cls, value: list[UUID] | None) -> list[UUID] | None:
+        if value is None:
+            return None
+        return list(dict.fromkeys(value))
 
 
 class CandidateGenerationBlockedResponse(BaseModel):

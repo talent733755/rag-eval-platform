@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/ui/empty-state";
+import { ProjectLink } from "@/components/ui/project-link";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { createApiClient } from "@/lib/api/client";
 import { getProjectIdFromSearch, useProjectSearch } from "@/lib/project-context";
@@ -63,12 +64,12 @@ export function DatasetsWorkspace() {
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                <tr><th className="px-3 py-3" scope="col">名称</th><th className="px-3 py-3" scope="col">状态</th><th className="px-3 py-3" scope="col">更新时间</th></tr>
+                <tr><th className="px-3 py-3" scope="col">名称</th><th className="px-3 py-3" scope="col">状态</th><th className="px-3 py-3" scope="col">更新时间</th><th className="px-3 py-3" scope="col">操作</th></tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {datasets.map((dataset) => {
                   const status = statusMap[dataset.status] ?? { label: "未知", status: "neutral" as const };
-                  return <tr key={dataset.id}><th scope="row" className="px-3 py-4 font-medium text-text">{dataset.name}</th><td className="px-3 py-4"><StatusBadge status={status.status}>{status.label}</StatusBadge></td><td className="px-3 py-4 text-muted">{new Date(dataset.updated_at).toLocaleString("zh-CN")}</td></tr>;
+                  return <tr key={dataset.id}><th scope="row" className="px-3 py-4 font-medium text-text">{dataset.name}</th><td className="px-3 py-4"><StatusBadge status={status.status}>{status.label}</StatusBadge></td><td className="px-3 py-4 text-muted">{new Date(dataset.updated_at).toLocaleString("zh-CN")}</td><td className="px-3 py-4"><ProjectLink href={`/review?dataset=${dataset.id}`} className="rounded-md border border-border px-3 py-1.5 text-sm text-text hover:border-primary hover:text-primary">去审核</ProjectLink></td></tr>;
                 })}
               </tbody>
             </table>

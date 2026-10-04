@@ -973,6 +973,86 @@ async def test_generation_snapshot_is_idempotent_and_captures_chunk_hashes(
 
 
 @pytest.mark.asyncio
+async def test_generation_aggregates_chunks_across_multiple_document_versions(
+    document_api_environment: tuple[
+        httpx.AsyncClient,
+        Seed,
+        Callable[[UUID], None],
+        async_sessionmaker[AsyncSession],
+        FakeBlobStore,
+    ],
+) -> None:
+    """Multi-document generation: one dataset version from two parsed documents."""
+
+    client, seed, set_actor, session_factory, _ = document_api_environment
+    set_actor(EDITOR_ID)
+    uploaded_1 = await upload(client, seed.project_id, key="generation-source-1")
+    uploaded_2 = await upload(
+        client,
+        seed.project_id,
+        key="generation-source-2",
+        filename="handbook-2.md",
+        content=b"# Second\n\nMore context.",
+    )
+    document_1_id = UUID(uploaded_1.json()["document"]["id"])
+    version_1_id = UUID(uploaded_1.json()["document_version"]["id"])
+    version_2_id = UUID(uploaded_2.json()["document_version"]["id"])
+    await _mark_version_parsed(
+        session_factory,
+        version_id=version_1_id,
+        organization_id=seed.organization_id,
+        project_id=seed.project_id,
+    )
+    await _mark_version_parsed(
+        session_factory,
+        version_id=version_2_id,
+        organization_id=seed.organization_id,
+        project_id=seed.project_id,
+    )
+    payload = CandidateGenerationRequest(
+        document_version_id=version_1_id,
+        document_version_ids=[version_1_id, version_2_id],
+        dataset_name="合并评测集",
+        capability_version="candidate-generation-v1",
+        prompt_version="prompt-v1",
+        seed=7,
+        randomness=0,
+    )
+
+    async with session_factory() as session:
+        job, dataset_version = await create_generation_job(
+            session,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            actor_id=EDITOR_ID,
+            document_id=document_1_id,
+            idempotency_key="multi-generation-key",
+            payload=payload,
+            provider_name="fake-test",
+            model_name="fixture",
+        )
+        assert job.source_version_id == version_1_id
+        config = await session.get(CandidateGenerationConfig, job.generation_config_id)
+        assert config is not None
+        assert config.requested_version_ids == [str(version_1_id), str(version_2_id)]
+        assert len(config.chunk_content_hashes) == 2
+        assert dataset_version.dataset_id is not None
+
+        replay_job, _ = await create_generation_job(
+            session,
+            organization_id=seed.organization_id,
+            project_id=seed.project_id,
+            actor_id=EDITOR_ID,
+            document_id=document_1_id,
+            idempotency_key="multi-generation-key",
+            payload=payload,
+            provider_name="fake-test",
+            model_name="fixture",
+        )
+        assert replay_job.id == job.id
+
+
+@pytest.mark.asyncio
 async def test_candidate_worker_persists_items_and_evidence_with_fenced_attempt(
     document_api_environment: tuple[
         httpx.AsyncClient,

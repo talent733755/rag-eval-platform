@@ -81,6 +81,7 @@ export type ApiClient = {
   publishCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   archiveCandidateDatasetVersion(projectId: string, datasetId: string, versionId: string, options?: { signal?: AbortSignal }): Promise<CandidateDatasetVersionResponse>;
   generateCandidates(projectId: string, documentId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
+  generateCandidateDataset(projectId: string, payload: CandidateGenerationRequest, options?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<CandidateGenerationJobResponse>;
   listAdapters(projectId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig[]>;
   createAdapter(projectId: string, payload: AdapterConfigCreate, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
   getAdapter(projectId: string, adapterId: string, options?: { signal?: AbortSignal }): Promise<AdapterConfig>;
@@ -227,6 +228,21 @@ export function createApiClient({
     async generateCandidates(projectId, documentId, payload, options) {
       return requestJson<CandidateGenerationJobResponse>(
         `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}/generate-candidates`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          signal: options?.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": options?.idempotencyKey ?? createIdempotencyKey(),
+          },
+        },
+        fetchImpl,
+      );
+    },
+    async generateCandidateDataset(projectId, payload, options) {
+      return requestJson<CandidateGenerationJobResponse>(
+        `${normalizedBaseUrl}/api/projects/${encodeURIComponent(projectId)}/candidate-datasets/generate`,
         {
           method: "POST",
           body: JSON.stringify(payload),

@@ -13,7 +13,7 @@ type Props = {
   documentVersionId: string;
   documentName: string;
   onClose: () => void;
-  onGenerated: (message: string) => void;
+  onGenerated: (datasetId: string, datasetName: string) => void;
 };
 
 /**
@@ -71,7 +71,7 @@ export function GenerateCandidatesDialog({
         seed: parsedSeed,
         randomness: parsedRandomness,
       });
-      onGenerated(`已加入生成队列：评测集「${name}」，任务 ${job.job_id}。请到「评测集 / 审核队列」查看进度。`);
+      onGenerated(job.dataset_id, name);
       onClose();
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : "候选生成请求失败");

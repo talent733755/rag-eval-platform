@@ -36,4 +36,37 @@ describe("CandidateReviewWorkspace", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "已发布" })).toBeInTheDocument());
     expect(fetchImpl).toHaveBeenCalledTimes(5);
   });
+
+  it("bulk-accepts all pending candidates in the version", async () => {
+    window.history.replaceState({}, "", `/review?project=${projectId}`);
+    const pendingItem = (id: string, question: string) => ({
+      id,
+      question,
+      reference_answer: "答案",
+      source_version_id: "version-1",
+      confidence: 0.9,
+      review_status: "pending",
+      evidence: [],
+    });
+    const acceptedItem = (id: string, question: string) => ({ ...pendingItem(id, question), review_status: "accepted" });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: datasetId, name: "产品评测集", status: "draft", updated_at: "2026-01-01T00:00:00Z" }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: versionId, dataset_id: datasetId, version_number: 1, status: "review", item_count: 2 }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [pendingItem("item-1", "问题一"), pendingItem("item-2", "问题二")], next_cursor: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(acceptedItem("item-1", "问题一")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(acceptedItem("item-2", "问题二")), { status: 200 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    render(<CandidateReviewWorkspace />);
+
+    await waitFor(() => expect(screen.getByText("问题一")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "全部接受" }));
+    await waitFor(() => expect(screen.getAllByText("已接受")).toHaveLength(2));
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining(`/candidate-datasets/${datasetId}/versions/${versionId}/review`),
+      expect.objectContaining({ method: "POST", body: expect.stringContaining('"review_status":"accepted"') }),
+    );
+    expect(screen.getByRole("button", { name: "发布版本" })).toBeEnabled();
+  });
 });

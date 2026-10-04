@@ -24,6 +24,7 @@ export function CandidateReviewWorkspace() {
   const [versionId, setVersionId] = useState("");
   const [state, dispatch] = useReducer(reviewReducer, initialReviewState);
   const [loading, setLoading] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<"accepted" | "rejected" | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -32,7 +33,12 @@ export function CandidateReviewWorkspace() {
       .listCandidateDatasets(projectId, { signal: controller.signal })
       .then((result) => {
         setDatasets(result);
-        setDatasetId((current) => current || result[0]?.id || "");
+        const requested = new URLSearchParams(projectSearch).get("dataset");
+        const initial =
+          requested && result.some((dataset) => dataset.id === requested)
+            ? requested
+            : result[0]?.id || "";
+        setDatasetId((current) => current || initial);
       })
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -49,7 +55,12 @@ export function CandidateReviewWorkspace() {
       .listCandidateDatasetVersions(projectId, datasetId, { signal: controller.signal })
       .then((result) => {
         setVersions(result);
-        setVersionId((current) => current || result[0]?.id || "");
+        const requested = new URLSearchParams(projectSearch).get("version");
+        const initial =
+          requested && result.some((version) => version.id === requested)
+            ? requested
+            : result[0]?.id || "";
+        setVersionId((current) => current || initial);
       })
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -121,6 +132,21 @@ export function CandidateReviewWorkspace() {
     }
   }
 
+  async function reviewAll(reviewStatus: "accepted" | "rejected") {
+    const pending = state.items.filter((item) => item.review_status === "pending");
+    if (isPublished || bulkBusy || pending.length === 0) return;
+    setBulkBusy(reviewStatus);
+    try {
+      for (const item of pending) {
+        await review(item as Item, reviewStatus);
+      }
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  const pendingCount = state.items.filter((item) => item.review_status === "pending").length;
+
   return (
     <div className="mx-auto max-w-screen-2xl space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -129,9 +155,18 @@ export function CandidateReviewWorkspace() {
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-text sm:text-3xl">审核队列</h1>
           <p className="mt-2 text-sm text-muted">逐条确认候选和来源证据；已发布版本不可修改。</p>
         </div>
-        <button type="button" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={isPublished || state.items.length === 0 || state.items.some((item) => item.review_status === "pending")} onClick={() => void publish()}>
-          {isPublished ? "已发布" : "发布版本"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {pendingCount > 0 && <span className="text-sm text-muted">待审核 {pendingCount} 条</span>}
+          <button type="button" className="rounded-md border border-success px-4 py-2 text-sm font-medium text-success-foreground disabled:cursor-not-allowed disabled:opacity-50" disabled={isPublished || bulkBusy !== null || pendingCount === 0} onClick={() => void reviewAll("accepted")}>
+            {bulkBusy === "accepted" ? "处理中…" : "全部接受"}
+          </button>
+          <button type="button" className="rounded-md border border-danger px-4 py-2 text-sm font-medium text-danger-foreground disabled:cursor-not-allowed disabled:opacity-50" disabled={isPublished || bulkBusy !== null || pendingCount === 0} onClick={() => void reviewAll("rejected")}>
+            {bulkBusy === "rejected" ? "处理中…" : "全部拒绝"}
+          </button>
+          <button type="button" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={isPublished || state.items.length === 0 || state.items.some((item) => item.review_status === "pending")} onClick={() => void publish()}>
+            {isPublished ? "已发布" : "发布版本"}
+          </button>
+        </div>
       </div>
       {state.error && <p className="text-sm text-danger-foreground" role="alert">{state.error}</p>}
       <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 sm:flex-row" aria-label="审核范围">

@@ -61,6 +61,7 @@ class _Claim:
     randomness: float
     request_id: str
     chunks: tuple[CandidateChunk, ...]
+    chunk_version: dict[UUID, UUID]
     lease_id: UUID
     attempt_number: int
     fencing_token: int
@@ -226,6 +227,10 @@ class CandidateWorker:
                 )
                 if config is None:
                     raise RuntimeError("generation configuration is unavailable")
+                version_ids = [
+                    UUID(value)
+                    for value in (config.requested_version_ids or [str(source_version_id)])
+                ]
                 dataset = await session.scalar(
                     select(CandidateDataset).where(
                         CandidateDataset.id == dataset_id,
@@ -240,16 +245,29 @@ class CandidateWorker:
                         await session.scalars(
                             select(DocumentChunk)
                             .where(
-                                DocumentChunk.document_version_id == source_version_id,
+                                DocumentChunk.document_version_id.in_(version_ids),
                                 DocumentChunk.organization_id == job.organization_id,
                                 DocumentChunk.project_id == job.project_id,
                             )
-                            .order_by(DocumentChunk.ordinal, DocumentChunk.id)
+                            .order_by(
+                                DocumentChunk.document_version_id,
+                                DocumentChunk.ordinal,
+                                DocumentChunk.id,
+                            )
                         )
                     ).all()
                 )
                 if not chunks:
                     raise RuntimeError("generation source has no chunks")
+                version_order = {vid: index for index, vid in enumerate(version_ids)}
+                chunks.sort(
+                    key=lambda chunk: (
+                        version_order.get(chunk.document_version_id, len(version_ids)),
+                        chunk.ordinal,
+                        chunk.id,
+                    )
+                )
+                chunk_version = {chunk.id: chunk.document_version_id for chunk in chunks}
                 attempt_number = job.attempt_count + 1
                 fencing_token = lease.fencing_token + 1 if lease is not None else 1
                 if lease is None:
@@ -303,6 +321,7 @@ class CandidateWorker:
                         )
                         for chunk in chunks
                     ),
+                    chunk_version=chunk_version,
                     lease_id=lease.id,
                     attempt_number=attempt_number,
                     fencing_token=fencing_token,
@@ -447,13 +466,18 @@ class CandidateWorker:
                                     **draft.automatic_checks,
                                     "quality_gate": verdict_to_checks(gate),
                                 }
+                                item_version = (
+                                    claim.chunk_version.get(draft.evidence[0].chunk_id)
+                                    if draft.evidence
+                                    else None
+                                ) or claim.source_version_id
                                 item = CandidateDatasetItem(
                                     organization_id=claim.organization_id,
                                     project_id=claim.project_id,
                                     dataset_id=claim.dataset_id,
                                     dataset_version_id=claim.dataset_version_id,
                                     generation_config_id=claim.config_id,
-                                    source_version_id=claim.source_version_id,
+                                    source_version_id=item_version,
                                     question=draft.question,
                                     question_type=draft.question_type,
                                     reference_answer=draft.reference_answer,
@@ -470,7 +494,9 @@ class CandidateWorker:
                                             organization_id=claim.organization_id,
                                             project_id=claim.project_id,
                                             item_id=item.id,
-                                            source_version_id=claim.source_version_id,
+                                            source_version_id=claim.chunk_version.get(
+                                                evidence.chunk_id, item_version
+                                            ),
                                             chunk_id=evidence.chunk_id,
                                             ordinal=evidence.ordinal,
                                             excerpt=evidence.excerpt,
