@@ -17,6 +17,42 @@ from rag_eval_api.candidates.protocol import (
 )
 from rag_eval_api.candidates.transport import ProviderTransport
 
+_SYSTEM_PROMPT = """You generate reviewable RAG evaluation candidates from source chunks.
+
+You receive a JSON object describing the request. Its `chunks` array holds source passages,
+each with `chunk_id`, `ordinal`, and `content`.
+
+Respond with ONLY a JSON object of this exact shape (no prose, no markdown fences):
+{
+  "items": [
+    {
+      "source_version_id": "<copy the request document_version_id>",
+      "question": "<a question answerable strictly from the chunks>",
+      "question_type": "<one of: factual | reasoning | summarization>",
+      "reference_answer": "<the ground-truth answer derived from the chunks>",
+      "confidence": <number 0..1>,
+      "automatic_checks": {},
+      "evidence": [
+        {
+          "source_version_id": "<same document_version_id>",
+          "chunk_id": "<chunk_id of the supporting chunk>",
+          "ordinal": <ordinal of the supporting chunk>,
+          "excerpt": "<short verbatim quote from that chunk>"
+        }
+      ],
+      "provenance": {}
+    }
+  ]
+}
+
+Rules:
+- Ground every question and answer ONLY in the provided chunks; never invent facts.
+- Each item must cite at least one evidence entry that references a real chunk_id and its ordinal.
+- source_version_id must exactly equal the request document_version_id.
+- Keep excerpt short (a few sentences at most) and copied from the chunk content.
+- Generate between 1 and 10 items depending on how much the chunks support.
+"""
+
 
 class OpenAICompatibleCandidateGenerator:
     """Call the minimal chat-completions shape and validate every result item."""
@@ -58,10 +94,11 @@ class OpenAICompatibleCandidateGenerator:
             "model": self.model_name,
             "temperature": request.randomness,
             "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": json.dumps(request.model_dump(mode="json"), ensure_ascii=False),
-                }
+                },
             ],
             "response_format": {"type": "json_object"},
         }
