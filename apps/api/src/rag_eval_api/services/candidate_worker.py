@@ -488,7 +488,14 @@ class CandidateWorker:
                                 )
                                 session.add(item)
                                 await session.flush()
+                                # The provider may emit the same (chunk_id, ordinal) twice;
+                                # dedupe while preserving order to satisfy the DB constraint.
+                                seen_evidence: set[tuple[object, int]] = set()
                                 for evidence in draft.evidence:
+                                    evidence_key = (evidence.chunk_id, evidence.ordinal)
+                                    if evidence_key in seen_evidence:
+                                        continue
+                                    seen_evidence.add(evidence_key)
                                     session.add(
                                         CandidateItemEvidence(
                                             organization_id=claim.organization_id,
