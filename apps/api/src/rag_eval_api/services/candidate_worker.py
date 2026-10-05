@@ -44,6 +44,34 @@ from rag_eval_api.services.ingestion_jobs import IngestionJobState
 LOGGER = logging.getLogger(__name__)
 
 
+def _select_same_version_evidence(
+    evidence: tuple[Any, ...],
+    chunk_version: dict[UUID, UUID],
+    item_version: UUID,
+) -> list[Any]:
+    """Keep only evidence that can be stored alongside the item.
+
+    ``candidate_item_evidence`` carries composite foreign keys to both the item and
+    the chunk, so every evidence row must share the item's document version. Candidate
+    items synthesised from several documents can cite chunks from other versions; those
+    citations are dropped. Duplicate ``(chunk_id, ordinal)`` pairs are also collapsed
+    while preserving order to satisfy the evidence uniqueness constraint.
+    """
+
+    kept: list[Any] = []
+    seen: set[tuple[object, int]] = set()
+    for entry in evidence:
+        entry_version = chunk_version.get(entry.chunk_id)
+        if entry_version is not None and entry_version != item_version:
+            continue
+        key = (entry.chunk_id, entry.ordinal)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(entry)
+    return kept
+
+
 @dataclass(frozen=True, slots=True)
 class _Claim:
     job_id: UUID
@@ -371,8 +399,12 @@ class CandidateWorker:
         """Split the chunk snapshot into bounded provider calls and merge candidates.
 
         Large multi-document snapshots can exceed a provider's context window, so we
-        fan out one call per ``chunk_batch_size`` chunks. A failed batch is skipped
-        (partial success) as long as at least one batch yields candidates.
+        fan out one call per ``chunk_batch_size`` chunks. Chunks coming from several
+        document versions each restart their ordinals at 0, which violates the public
+        request contract (unique ordinals per request). We renumber ordinals per batch
+        while keeping ``chunk_id`` stable — evidence attribution downstream is keyed
+        by ``chunk_id``, never by ordinal. A failed batch is skipped (partial success)
+        as long as at least one batch yields candidates.
         """
 
         chunks = claim.chunks
@@ -385,6 +417,16 @@ class CandidateWorker:
         last_error: Exception | None = None
         succeeded_batches = 0
         for batch_index, batch in enumerate(batches):
+            renumbered = tuple(
+                CandidateChunk(
+                    chunk_id=chunk.chunk_id,
+                    ordinal=position,
+                    content=chunk.content,
+                    content_hash=chunk.content_hash,
+                    source_location=chunk.source_location,
+                )
+                for position, chunk in enumerate(batch)
+            )
             request = CandidateGenerationRequest(
                 document_version_id=claim.source_version_id,
                 dataset_name=claim.dataset_name,
@@ -393,7 +435,7 @@ class CandidateWorker:
                 parser_version=claim.parser_version,
                 seed=claim.seed,
                 randomness=claim.randomness,
-                chunks=batch,
+                chunks=renumbered,
                 request_id=f"{claim.request_id}#{batch_index}",
             )
             try:
@@ -533,6 +575,16 @@ class CandidateWorker:
                                     if draft.evidence
                                     else None
                                 ) or claim.source_version_id
+                                # The schema anchors an item to a single document version and
+                                # requires its evidence to match both the item and the chunk on
+                                # that version, so cross-version citations and duplicate
+                                # (chunk_id, ordinal) pairs are dropped while preserving order.
+                                kept_evidence = _select_same_version_evidence(
+                                    draft.evidence, claim.chunk_version, item_version
+                                )
+                                if not kept_evidence:
+                                    # Never persist a candidate with no valid evidence.
+                                    continue
                                 item = CandidateDatasetItem(
                                     organization_id=claim.organization_id,
                                     project_id=claim.project_id,
@@ -550,22 +602,13 @@ class CandidateWorker:
                                 )
                                 session.add(item)
                                 await session.flush()
-                                # The provider may emit the same (chunk_id, ordinal) twice;
-                                # dedupe while preserving order to satisfy the DB constraint.
-                                seen_evidence: set[tuple[object, int]] = set()
-                                for evidence in draft.evidence:
-                                    evidence_key = (evidence.chunk_id, evidence.ordinal)
-                                    if evidence_key in seen_evidence:
-                                        continue
-                                    seen_evidence.add(evidence_key)
+                                for evidence in kept_evidence:
                                     session.add(
                                         CandidateItemEvidence(
                                             organization_id=claim.organization_id,
                                             project_id=claim.project_id,
                                             item_id=item.id,
-                                            source_version_id=claim.chunk_version.get(
-                                                evidence.chunk_id, item_version
-                                            ),
+                                            source_version_id=item_version,
                                             chunk_id=evidence.chunk_id,
                                             ordinal=evidence.ordinal,
                                             excerpt=evidence.excerpt,

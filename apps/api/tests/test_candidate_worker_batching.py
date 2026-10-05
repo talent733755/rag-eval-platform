@@ -2,24 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
-from rag_eval_api.candidates.protocol import CandidateGenerationResult
-from rag_eval_api.services.candidate_worker import CandidateWorker, _Claim
+from rag_eval_api.candidates.protocol import (
+    CandidateChunk,
+    CandidateEvidence,
+    CandidateGenerationResult,
+)
+from rag_eval_api.services.candidate_worker import (
+    CandidateWorker,
+    _Claim,
+    _select_same_version_evidence,
+)
 
 
-def _chunk(content: str, ordinal: int) -> dict[str, Any]:
-    return {
-        "chunk_id": str(uuid4()),
-        "ordinal": ordinal,
-        "content": content,
-        "content_hash": f"{ordinal:064d}",
-        "source_location": {},
-    }
+def _chunk(content: str, ordinal: int) -> CandidateChunk:
+    return CandidateChunk(
+        chunk_id=uuid4(),
+        ordinal=ordinal,
+        content=content,
+        content_hash=f"{ordinal:064d}",
+        source_location={},
+    )
 
 
 def _make_claim(worker: CandidateWorker, chunk_count: int) -> _Claim:
@@ -55,15 +64,16 @@ class _RecordingGenerator:
 
     def __init__(self, fail_on_call: set[int] | None = None) -> None:
         self.calls: list[int] = []
+        self.seen_ordinals: list[list[int]] = []
         self._fail_on_call = fail_on_call or set()
 
     def generate(self, request: Any, cancel_token: object | None = None) -> Any:
         call_index = len(self.calls)
         self.calls.append(len(request.chunks))
+        self.seen_ordinals.append([c.ordinal for c in request.chunks])
         if call_index in self._fail_on_call:
             raise RuntimeError("provider_timeout")
-        result = self._fake_result(request.chunks)
-        return result
+        return self._fake_result(request.chunks)
 
     @staticmethod
     def _fake_result(chunks: Any) -> CandidateGenerationResult:
@@ -134,3 +144,48 @@ async def test_all_batches_failing_raises_for_safe_failure() -> None:
 
     with pytest.raises(RuntimeError):
         await worker._generate_all_batches(claim)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ordinals_across_documents_are_renumbered_per_batch() -> None:
+    """Chunks from several document versions share ordinals (each doc starts at 0).
+
+    The public request contract requires unique ordinals, so the worker must
+    renumber them per batch while keeping chunk_id stable for evidence mapping.
+    """
+
+    generator = _RecordingGenerator()
+    worker = _worker(generator, chunk_batch_size=10)
+    # Two documents, each with ordinals 0..4 -> duplicates once merged.
+    chunks = tuple(
+        _chunk(f"doc{doc} chunk{ordinal}", ordinal) for doc in range(2) for ordinal in range(5)
+    )
+    base = _make_claim(worker, chunk_count=0)
+    claim = replace(base, chunks=chunks)
+
+    result = await worker._generate_all_batches(claim)
+
+    assert generator.calls == [10]
+    assert len(result.items) == 1
+    # The generator must have received unique, contiguous ordinals.
+    seen_ordinals = generator.seen_ordinals[0]
+    assert sorted(seen_ordinals) == list(range(10))
+
+
+def test_select_same_version_evidence_drops_cross_version_and_duplicates() -> None:
+    version_a = uuid4()
+    version_b = uuid4()
+    chunk_a = uuid4()
+    chunk_b = uuid4()
+    chunk_version = {chunk_a: version_a, chunk_b: version_b}
+    evidence = (
+        CandidateEvidence(source_version_id=version_a, chunk_id=chunk_a, ordinal=0, excerpt="a"),
+        # Same chunk/ordinal twice -> collapsed.
+        CandidateEvidence(source_version_id=version_a, chunk_id=chunk_a, ordinal=0, excerpt="a2"),
+        # Chunk belongs to a different document version -> dropped.
+        CandidateEvidence(source_version_id=version_a, chunk_id=chunk_b, ordinal=1, excerpt="b"),
+    )
+
+    kept = _select_same_version_evidence(evidence, chunk_version, version_a)
+
+    assert [e.chunk_id for e in kept] == [chunk_a]

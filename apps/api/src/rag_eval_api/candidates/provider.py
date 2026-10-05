@@ -10,6 +10,7 @@ import httpx
 
 from rag_eval_api.candidates.errors import ProviderTransportError
 from rag_eval_api.candidates.protocol import (
+    CandidateChunk,
     CandidateGenerationRequest,
     CandidateGenerationResult,
     CandidateItemDraft,
@@ -52,6 +53,98 @@ Rules:
 - Keep excerpt short (a few sentences at most) and copied from the chunk content.
 - Generate between 1 and 10 items depending on how much the chunks support.
 """
+
+
+_QUESTION_TYPE_ALIASES = {
+    "factoid": "factual",
+    "fact": "factual",
+    "factual": "factual",
+    "reasoning": "reasoning",
+    "summarization": "summarization",
+    "summary": "summarization",
+    "aggregation": "reasoning",
+    "comparison": "reasoning",
+    "unanswerable": "factual",
+}
+
+
+def _normalize_items(decoded: dict[str, object], request: CandidateGenerationRequest) -> list[object]:
+    """Tolerate common model schema drift and coerce items to the public contract.
+
+    The gateway model sometimes renames the top-level array (``candidates`` instead of
+    ``items``), invents question types (``factoid``/``aggregation``), or cites evidence
+    as a flat ``supporting_chunk_ids`` list instead of structured entries. Normalizing
+    here keeps generation robust without weakening the strict ``CandidateItemDraft``
+    contract; ordinals/excerpts are recovered from the request chunks.
+    """
+
+    chunk_by_id = {str(chunk.chunk_id): chunk for chunk in request.chunks}
+
+    raw = decoded.get("items")
+    if raw is None:
+        for alias in ("candidates", "questions", "data", "results"):
+            if isinstance(decoded.get(alias), list):
+                raw = decoded[alias]
+                break
+    if not isinstance(raw, list):
+        raise ValueError("candidate payload must contain an items array")
+
+    normalized: list[object] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        draft = dict(item)
+        qtype = str(draft.get("question_type", "")).strip().lower()
+        draft["question_type"] = _QUESTION_TYPE_ALIASES.get(qtype, "factual")
+        draft.setdefault("source_version_id", request.document_version_id)
+        draft.setdefault("confidence", 0.5)
+        draft.setdefault("automatic_checks", {})
+        draft.setdefault("provenance", {})
+        draft["evidence"] = _normalize_evidence(draft, chunk_by_id, request)
+        if not draft["evidence"]:
+            continue
+        normalized.append(draft)
+    return normalized
+
+
+def _normalize_evidence(
+    draft: dict[str, object],
+    chunk_by_id: dict[str, CandidateChunk],
+    request: CandidateGenerationRequest,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    evidence = draft.get("evidence")
+    if isinstance(evidence, list) and evidence and all(isinstance(e, dict) for e in evidence):
+        for entry in evidence:
+            chunk = chunk_by_id.get(str(entry.get("chunk_id")))
+            if chunk is None:
+                continue
+            entries.append(
+                {
+                    "source_version_id": request.document_version_id,
+                    "chunk_id": str(chunk.chunk_id),
+                    "ordinal": chunk.ordinal,
+                    "excerpt": str(entry.get("excerpt") or chunk.content[:500]),
+                }
+            )
+        return entries
+    # Model cited chunks as a flat id list.
+    supporting = draft.get("supporting_chunk_ids") or draft.get("chunk_ids")
+    if not isinstance(supporting, list):
+        return []
+    for chunk_id in supporting:
+        chunk = chunk_by_id.get(str(chunk_id))
+        if chunk is None:
+            continue
+        entries.append(
+            {
+                "source_version_id": request.document_version_id,
+                "chunk_id": str(chunk.chunk_id),
+                "ordinal": chunk.ordinal,
+                "excerpt": chunk.content[:500],
+            }
+        )
+    return entries
 
 
 class OpenAICompatibleCandidateGenerator:
@@ -116,7 +209,9 @@ class OpenAICompatibleCandidateGenerator:
             decoded = json.loads(content)
             if not isinstance(decoded, dict):
                 raise ValueError("candidate payload must be an object")
-            items = tuple(CandidateItemDraft.model_validate(item) for item in decoded["items"])
+            items = tuple(
+                CandidateItemDraft.model_validate(item) for item in _normalize_items(decoded, request)
+            )
             usage = response.get("usage", {})
             usage = usage if isinstance(usage, dict) else {}
             return CandidateGenerationResult(
